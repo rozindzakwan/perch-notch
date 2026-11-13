@@ -169,6 +169,17 @@ impl Reminders {
         }
     }
 
+    /// Set how long until one reminder fires, capped at its interval and
+    /// floored at one second. Used when a stretch reminder turns out not to
+    /// have been earned because the user was idle: the remaining active time
+    /// is exactly the time they were away.
+    pub fn postpone_to(&mut self, kind: ReminderKind, remaining: Duration) {
+        let timer = self.timer_mut(kind);
+        if timer.enabled() {
+            timer.remaining = remaining.min(timer.interval).max(Duration::from_secs(1));
+        }
+    }
+
     fn timer(&self, kind: ReminderKind) -> &Timer {
         match kind {
             ReminderKind::Water => &self.water,

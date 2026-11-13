@@ -49,6 +49,42 @@ pub struct Monitor {
     pub scale: f64,
     /// Whether this is the primary monitor.
     pub primary: bool,
+    /// The usable area after taskbars/panels (Windows `rcWork`, X11
+    /// `_NET_WORKAREA`). `None` = the whole monitor. The notch and its hot zone
+    /// hug this area, so a taskbar or a Cinnamon panel on the same edge pushes
+    /// the pill below it instead of fighting it for the same pixels.
+    pub work: Option<Rect>,
+}
+
+impl Monitor {
+    /// The full monitor rectangle.
+    pub fn full(&self) -> Rect {
+        Rect {
+            x: self.x,
+            y: self.y,
+            w: self.width,
+            h: self.height,
+        }
+    }
+
+    /// The rectangle the notch is placed in: the work area when it is known
+    /// and sane (non-empty and inside the monitor), otherwise the full monitor.
+    pub fn bounds(&self) -> Rect {
+        let full = self.full();
+        match self.work {
+            Some(w)
+                if w.w > 0
+                    && w.h > 0
+                    && w.x >= full.x
+                    && w.y >= full.y
+                    && w.x + w.w as i32 <= full.x + full.w as i32
+                    && w.y + w.h as i32 <= full.y + full.h as i32 =>
+            {
+                w
+            }
+            _ => full,
+        }
+    }
 }
 
 /// Which screen edge the notch (and therefore its hot zone) lives on.
@@ -154,7 +190,7 @@ impl Default for NotchGeometry {
     fn default() -> Self {
         Self {
             collapsed: (200, 32),
-            expanded: (440, 132),
+            expanded: (480, 200),
             margin: 12,
             hot_zone_thickness: 2,
             hot_zone_padding: 40,
@@ -195,22 +231,35 @@ pub fn notch_rect(
     geo: &NotchGeometry,
     expanded: bool,
 ) -> Rect {
-    let (lw, lh) = if expanded {
+    let size = if expanded {
         geo.expanded
     } else {
         geo.collapsed
     };
+    notch_rect_sized(monitor, position, geo, size)
+}
+
+/// Place a pill of an arbitrary logical `size` at the anchor. Used while
+/// animating, when the size is interpolated between collapsed and expanded.
+pub fn notch_rect_sized(
+    monitor: &Monitor,
+    position: NotchPosition,
+    geo: &NotchGeometry,
+    size: (u32, u32),
+) -> Rect {
+    let (lw, lh) = size;
     let w = scaled(lw, monitor.scale);
     let h = scaled(lh, monitor.scale);
     let margin = scaled(geo.margin, monitor.scale) as i32;
 
-    let left = monitor.x;
-    let top = monitor.y;
-    let right = monitor.x + monitor.width as i32;
-    let bottom = monitor.y + monitor.height as i32;
+    let b = monitor.bounds();
+    let left = b.x;
+    let top = b.y;
+    let right = b.x + b.w as i32;
+    let bottom = b.y + b.h as i32;
 
-    let centered_x = left + (monitor.width as i32 - w as i32) / 2;
-    let centered_y = top + (monitor.height as i32 - h as i32) / 2;
+    let centered_x = left + (b.w as i32 - w as i32) / 2;
+    let centered_y = top + (b.h as i32 - h as i32) / 2;
 
     let (x, y) = match position {
         NotchPosition::TopCenter => (centered_x, top),
@@ -223,8 +272,8 @@ pub fn notch_rect(
         NotchPosition::RightCenter => (right - w as i32, centered_y),
     };
 
-    let (x, w) = clamp_span(x, w, left, monitor.width);
-    let (y, h) = clamp_span(y, h, top, monitor.height);
+    let (x, w) = clamp_span(x, w, left, b.w);
+    let (y, h) = clamp_span(y, h, top, b.h);
     Rect { x, y, w, h }
 }
 
@@ -235,17 +284,18 @@ pub fn hot_zone_rect(monitor: &Monitor, position: NotchPosition, geo: &NotchGeom
     let thickness = scaled(geo.hot_zone_thickness.max(1), monitor.scale);
     let pad = scaled(geo.hot_zone_padding, monitor.scale);
 
+    let b = monitor.bounds();
     let rect = match edge {
         Edge::Top | Edge::Bottom => {
             let len = collapsed.w.saturating_add(pad.saturating_mul(2));
             let x = collapsed.center_x() - len as i32 / 2;
-            let (x, len) = clamp_span(x, len, monitor.x, monitor.width);
+            let (x, len) = clamp_span(x, len, b.x, b.w);
             let y = if edge == Edge::Top {
-                monitor.y
+                b.y
             } else {
-                monitor.y + monitor.height as i32 - thickness as i32
+                b.y + b.h as i32 - thickness as i32
             };
-            let (y, thickness) = clamp_span(y, thickness, monitor.y, monitor.height);
+            let (y, thickness) = clamp_span(y, thickness, b.y, b.h);
             Rect {
                 x,
                 y,
@@ -256,13 +306,13 @@ pub fn hot_zone_rect(monitor: &Monitor, position: NotchPosition, geo: &NotchGeom
         Edge::Left | Edge::Right => {
             let len = collapsed.h.saturating_add(pad.saturating_mul(2));
             let y = collapsed.center_y() - len as i32 / 2;
-            let (y, len) = clamp_span(y, len, monitor.y, monitor.height);
+            let (y, len) = clamp_span(y, len, b.y, b.h);
             let x = if edge == Edge::Left {
-                monitor.x
+                b.x
             } else {
-                monitor.x + monitor.width as i32 - thickness as i32
+                b.x + b.w as i32 - thickness as i32
             };
-            let (x, thickness) = clamp_span(x, thickness, monitor.x, monitor.width);
+            let (x, thickness) = clamp_span(x, thickness, b.x, b.w);
             Rect {
                 x,
                 y,

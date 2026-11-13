@@ -10,9 +10,13 @@
 #[cfg(windows)]
 mod autostart;
 #[cfg(windows)]
+pub mod events;
+#[cfg(windows)]
 mod fullscreen;
 #[cfg(windows)]
 mod monitors;
+#[cfg(windows)]
+pub mod services;
 #[cfg(windows)]
 mod single_instance;
 #[cfg(windows)]
@@ -21,9 +25,13 @@ pub mod window;
 #[cfg(windows)]
 pub use autostart::RegistryAutostart;
 #[cfg(windows)]
+pub use events::{EventFlags, WindowsEvents};
+#[cfg(windows)]
 pub use fullscreen::FullscreenDetector;
 #[cfg(windows)]
 pub use monitors::{monitor_under_cursor, WindowsMonitors};
+#[cfg(windows)]
+pub use services::{LastInputIdle, ShellOpener, ToastNotifier};
 #[cfg(windows)]
 pub use single_instance::NamedPipeInstance;
 

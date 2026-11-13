@@ -41,6 +41,9 @@ pub struct NotchWindows {
     surface: Surface<Rc<Window>, Rc<Window>>,
     pill_id: WindowId,
     hot_id: WindowId,
+    /// No compositor (X11 without ARGB compositing): paint opaque and clip
+    /// the window to the pill shape instead.
+    opaque: bool,
 }
 
 fn pill_attributes(rect: Rect) -> winit::window::WindowAttributes {
@@ -117,12 +120,14 @@ impl NotchWindows {
             .map_err(|e| Error::backend(format!("creating the hot-zone window: {e}")))?;
         let hot = Rc::new(hot);
 
+        let opaque = Self::detect_opaque();
         let me = Self {
             pill_id: pill.id(),
             hot_id: hot.id(),
             pill,
             hot,
             surface,
+            opaque,
         };
         me.apply_platform_styles()?;
         Ok(me)
@@ -335,5 +340,72 @@ impl NotchWindows {
         buffer
             .present()
             .map_err(|e| Error::backend(format!("surface present: {e}")))
+    }
+}
+
+impl NotchWindows {
+    /// Whether frames must be painted opaque (no compositor).
+    pub fn needs_opaque(&self) -> bool {
+        self.opaque
+    }
+}
+
+impl NotchWindows {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    fn detect_opaque() -> bool {
+        // ARGB transparency needs a compositing manager (Muffin is one). Without
+        // it the transparent corners would render black, so paint opaque and
+        // clip the window to the pill shape with XShape instead.
+        !perch_platform_linux::x11::compositor_running()
+    }
+
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    fn detect_opaque() -> bool {
+        false
+    }
+}
+
+impl NotchWindows {
+    /// Clip the pill window to its rounded shape. Only needed (and only does
+    /// anything) on X11 without a compositor, where transparency is not
+    /// available; elsewhere the alpha channel already gives round corners.
+    pub fn clip_to_pill(&self, w: u32, h: u32, radius: u32) {
+        if !self.opaque {
+            return;
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            let id = match self.pill.window_handle().map(|h| h.as_raw()) {
+                Ok(RawWindowHandle::Xlib(h)) => Some(h.window as u32),
+                Ok(RawWindowHandle::Xcb(h)) => Some(h.window.get()),
+                _ => None,
+            };
+            if let Some(id) = id {
+                if let Err(e) = perch_platform_linux::x11::set_rounded_shape(id, w, h, radius) {
+                    log::debug!("XShape clip failed: {e}");
+                }
+            }
+        }
+        #[cfg(not(all(unix, not(target_os = "macos"))))]
+        let _ = (w, h, radius);
+    }
+}
+
+impl NotchWindows {
+    /// The X11 window ids of the pill and the hover strip, when running on X11.
+    pub fn x11_ids(&self) -> Option<(u32, u32)> {
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            let id = |w: &Window| match w.window_handle().map(|h| h.as_raw()) {
+                Ok(RawWindowHandle::Xlib(h)) => Some(h.window as u32),
+                Ok(RawWindowHandle::Xcb(h)) => Some(h.window.get()),
+                _ => None,
+            };
+            Some((id(&self.pill)?, id(&self.hot)?))
+        }
+        #[cfg(not(all(unix, not(target_os = "macos"))))]
+        None
     }
 }

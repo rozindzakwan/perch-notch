@@ -71,3 +71,91 @@ you prefer MSVC locally, install the Build Tools and
 is an original minimal bird glyph drawn as vector paths in
 `crates/ui/src/art.rs`; no assets, names, or artwork from layzee or anything
 else are used.
+
+## ADR-005: Linux verification in a local Ubuntu 22.04 container
+
+**Date:** 2026-11-14 - **Status:** accepted
+
+The development machine is Windows and has no GitHub remote configured, so
+GitHub Actions cannot run yet. `docker/linux-ci.Dockerfile` builds an
+`ubuntu:22.04` image (glibc 2.35, the Linux Mint 21 base) and
+`scripts/linux-ci.sh` holds the exact Linux CI steps; `.github/workflows/ci.yml`
+runs the same script on `ubuntu-22.04`. Results from the container are labelled
+"CI-verified (ubuntu-22.04 container)". Only `scripts/mint-test.sh` output from
+a real Mint machine is labelled "verified on real Mint".
+
+## ADR-006: Event plumbing = winit `EventLoopProxy`, no async runtime
+
+Every backend owns at most one blocking thread (Win32 message loop with
+WinEvent hooks, X11 `wait_for_event`, zbus blocking, IPC accept) and delivers
+`PlatformEvent`s through an `EventSink` that wraps winit's `EventLoopProxy`, so
+any backend event wakes an otherwise fully idle loop. Timers (animation,
+Pomodoro seconds, reminders, to-do due times, the seek bar while visible) are
+deadlines folded into `ControlFlow::WaitUntil`. There is no tokio; `zbus` runs
+on its own async-io executor behind the blocking API. Idle time is read once at
+a reminder's deadline (plus lock/unlock events), never on a loop.
+
+## ADR-007: Tray = `tray-icon` on Windows, StatusNotifierItem on Linux
+
+`tray-icon` pulls GTK into Linux builds, so it is a Windows-only dependency.
+Linux uses `ksni` (pure Rust SNI over D-Bus; Mint ships `xapp-sn-watcher`) and
+falls back to a minimal XEmbed icon (`_NET_SYSTEM_TRAY_S0`) when no SNI host
+exists. The tray, CLI and hotkeys all emit the same command verbs.
+
+## ADR-008: Packaging = NSIS (per-user) + portable zip; `.deb` from the container
+
+NSIS runs from a portable zip (no admin) and produces a per-user installer
+(`RequestExecutionLevel user`, `%LOCALAPPDATA%\Programs\Perch`, HKCU uninstall
+key). WiX was skipped: per-user MSIs are awkward and WiX needs .NET. The `.deb`
+is built with `cargo-deb` inside the 22.04 container for glibc compatibility.
+
+## ADR-009: Notifications always have an in-notch fallback
+
+Windows toasts need a registered AppUserModelID; Perch registers one under
+`HKCU\Software\Classes\AppUserModelId\Perch.Notch` (no admin, no shortcut).
+Linux uses `org.freedesktop.Notifications`. Every notification is also shown as
+a transient message in the collapsed pill, so a missing notification daemon
+loses nothing.
+
+## ADR-010: Heavy features are compile-time *and* run-time optional
+
+The default release build includes everything except dictation (`speech`),
+which ships as a separate `perch-speech` build. All Phase 5 features are off in
+the default config and initialise on first use.
+
+## ADR-011: The model/shell split
+
+`crates/app/src/model.rs` holds all feature state and turns actions, platform
+events and deadlines into `Effect`s; it never touches the OS. The winit shell
+carries effects out. The renderer paints a plain-data `PanelView` and returns
+hit regions tagged with `Action`s, so clicks round-trip through pure code. This
+is what lets `tests/model.rs` drive every feature with fake backends and a fake
+clock.
+
+## Bugs found by the smoke tests (and fixed)
+
+- **CLI commands never woke an idle loop.** IPC pushed into an mpsc channel
+  drained only in `about_to_wait`; with `ControlFlow::Wait` nothing ran it.
+  Fixed by delivering through `EventLoopProxy` (ADR-006).
+- **Maximised windows hid the notch.** On a monitor whose taskbar auto-hides, a
+  maximised window covers the whole screen; the geometry check called it
+  fullscreen. Zoomed windows are now never fullscreen, and Windows 11 shell
+  overlays (`XamlExplorerHostIslandWindow`, Task View, Alt-Tab) are excluded.
+- **The pill stayed hidden after a fullscreen app closed.** The shell's "quiet"
+  state lags the window that caused it. A single one-shot re-check is armed
+  1.5 s after each foreground change (one extra wakeup, never a loop).
+- **Hover collapsed while the cursor was on the pill.** Windows delivers the
+  growing pill's `CursorEntered` *before* the strip's `CursorLeft`. The notch
+  state machine now tracks the strip and the pill separately and collapses only
+  when the pointer has left both.
+- **A GUI instance could freeze on a blocked console write.** Release builds
+  attached to the parent console; with nobody draining it the first log line
+  blocked the UI thread. Only short-lived CLI invocations attach now; the
+  running instance logs to a size-capped `perch.log` in its data directory.
+- **X11 keep-above was lost.** Once mapped, the WM owns `_NET_WM_STATE`, and
+  requests sent before the WM has managed the window are ignored (also after
+  "Restart Cinnamon"). The X11 watcher now re-requests the states whenever the
+  WM sets `WM_STATE` on a notch window or `_NET_SUPPORTING_WM_CHECK` changes.
+- **Idle RSS grew 26 MB after opening settings (Linux).** glibc kept the freed
+  frame buffers. Forms reuse their pixmap and Perch calls `malloc_trim` after
+  closing a form.

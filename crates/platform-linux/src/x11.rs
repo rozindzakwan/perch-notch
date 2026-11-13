@@ -50,7 +50,7 @@ pub struct Atoms {
     pub wm_class: Atom,
 }
 
-fn intern(conn: &RustConnection, name: &str) -> Result<Atom> {
+pub(crate) fn intern(conn: &RustConnection, name: &str) -> Result<Atom> {
     let cookie = conn
         .intern_atom(false, name.as_bytes())
         .map_err(|e| Error::backend(format!("intern_atom({name}): {e}")))?;
@@ -305,12 +305,18 @@ impl MonitorSource for X11Monitors {
             .reply()
             .map_err(|e| Error::unavailable("randr", format!("get_monitors reply: {e}")))?;
 
+        let wa = crate::x11_watch::work_area(&conn, root);
+        let desktop = desktop_scale(&conn, root);
         let mut out = Vec::with_capacity(reply.monitors.len());
         for (i, m) in reply.monitors.iter().enumerate() {
+            // Cinnamon's user-chosen scaling (Xft.dpi / GDK_SCALE) wins; the
+            // RandR heuristic below is only a fallback.
             // RandR reports physical size in millimetres; the ratio of pixels
             // to millimetres gives the real DPI, which is how we derive a HiDPI
             // scale factor without reading desktop settings.
-            let scale = if m.width_in_millimeters > 0 {
+            let scale = if let Some(s) = desktop {
+                s
+            } else if m.width_in_millimeters > 0 {
                 let dpi = f64::from(m.width) / (f64::from(m.width_in_millimeters) / 25.4);
                 // Snap to the usual steps so a 110-dpi laptop panel does not
                 // get a weird 1.14 scale.
@@ -326,6 +332,17 @@ impl MonitorSource for X11Monitors {
                 height: u32::from(m.height),
                 scale,
                 primary: m.primary,
+                work: wa.and_then(|wa| {
+                    crate::x11_watch::monitor_work_area(
+                        (
+                            i32::from(m.x),
+                            i32::from(m.y),
+                            u32::from(m.width),
+                            u32::from(m.height),
+                        ),
+                        wa,
+                    )
+                }),
             });
         }
         if out.is_empty() {
@@ -333,4 +350,53 @@ impl MonitorSource for X11Monitors {
         }
         Ok(out)
     }
+}
+
+pub use crate::x11_watch::{
+    compositor_running, monitor_work_area, rounded_spans, set_rounded_shape, window_title,
+    work_area, WatchFlags, X11Watcher,
+};
+
+/// Parse `Xft.dpi` out of an X resource database string (the root window's
+/// `RESOURCE_MANAGER`), which is where Cinnamon publishes its scaling factor.
+/// Pure.
+pub fn parse_xft_dpi(resources: &str) -> Option<f64> {
+    resources.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        if key.trim() == "Xft.dpi" {
+            value.trim().parse::<f64>().ok().filter(|d| *d > 0.0)
+        } else {
+            None
+        }
+    })
+}
+
+/// The desktop's scale factor: `PERCH_SCALE` or `GDK_SCALE` if set, else
+/// `Xft.dpi / 96` from `RESOURCE_MANAGER`, snapped to usual steps.
+fn desktop_scale(conn: &RustConnection, root: Window) -> Option<f64> {
+    for var in ["PERCH_SCALE", "GDK_SCALE"] {
+        if let Some(s) = std::env::var(var).ok().and_then(|v| v.parse::<f64>().ok()) {
+            if s > 0.0 && s.is_finite() {
+                return Some(s);
+            }
+        }
+    }
+    let reply = conn
+        .get_property(
+            false,
+            root,
+            AtomEnum::RESOURCE_MANAGER,
+            AtomEnum::STRING,
+            0,
+            64 * 1024,
+        )
+        .ok()?
+        .reply()
+        .ok()?;
+    let text = String::from_utf8_lossy(&reply.value);
+    parse_xft_dpi(&text).map(|dpi| {
+        let raw = dpi / 96.0;
+        // Respect deliberate fractional scaling, but snap to quarter steps.
+        ((raw * 4.0).round() / 4.0).clamp(1.0, 4.0)
+    })
 }

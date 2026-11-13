@@ -1,0 +1,85 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    name: windows (${{ matrix.target }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-pc-windows-msvc, x86_64-pc-windows-gnu]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy (default features)
+        run: cargo clippy --workspace --all-targets --locked --target ${{ matrix.target }} -- -D warnings
+      - name: clippy (all features)
+        run: cargo clippy --workspace --all-targets --all-features --locked --target ${{ matrix.target }} -- -D warnings
+      - name: test
+        run: cargo test --workspace --all-features --locked --target ${{ matrix.target }}
+      - name: build release
+        run: cargo build --release --locked -p perch --target ${{ matrix.target }}
+      - name: UI smoke test (hover via SendInput)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: ./scripts/smoke-windows.ps1 -Exe target/${{ matrix.target }}/release/perch.exe -OutDir artifacts/windows
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-${{ matrix.target }}
+          path: |
+            artifacts/windows
+            target/${{ matrix.target }}/release/perch.exe
+
+  linux:
+    name: linux (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: apt dependencies (same list as docker/linux-ci.Dockerfile)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config cmake clang libclang-dev \
+            libx11-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libpulse-dev libasound2-dev libv4l-dev \
+            xvfb openbox xdotool x11-utils x11-xserver-utils imagemagick xclip \
+            dbus dbus-x11 playerctl picom sway pulseaudio pulseaudio-utils \
+            sysstat procps psmisc file dpkg-dev fakeroot tesseract-ocr \
+            jq wmctrl x11-apps stalonetray
+      - name: install cargo-deb
+        run: cargo install --locked cargo-deb
+      - name: linux-ci (check, test, build, smoke, mpris, pulse, wayland, deb)
+        run: scripts/linux-ci.sh all
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux
+          path: artifacts/linux
+
+  audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install --locked cargo-audit
+      - run: cargo audit

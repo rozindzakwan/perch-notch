@@ -24,8 +24,10 @@ env_logger.workspace = true
 notify.workspace = true
 winit.workspace = true
 tiny-skia.workspace = true
-tray-icon = { workspace = true, features = ["libxdo"] }
 image = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+directories.workspace = true
 ureq = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
 
@@ -52,6 +54,7 @@ all-features = [
 ]
 
 [target.'cfg(windows)'.dependencies]
+tray-icon = { workspace = true }
 perch-platform-windows = { path = "../platform-windows" }
 
 [target.'cfg(target_os = "linux")'.dependencies]

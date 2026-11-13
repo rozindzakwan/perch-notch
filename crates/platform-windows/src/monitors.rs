@@ -77,6 +77,14 @@ unsafe extern "system" fn enum_proc(
         height: (r.bottom - r.top).max(0) as u32,
         scale: f64::from(dpi_x.max(1)) / 96.0,
         primary: info.monitorInfo.dwFlags & MONITORINFOF_PRIMARY != 0,
+        // rcWork excludes the taskbar (wherever the user docked it, including
+        // the top), so the notch sits below a top taskbar instead of under it.
+        work: Some(perch_core::geometry::Rect {
+            x: info.monitorInfo.rcWork.left,
+            y: info.monitorInfo.rcWork.top,
+            w: (info.monitorInfo.rcWork.right - info.monitorInfo.rcWork.left).max(0) as u32,
+            h: (info.monitorInfo.rcWork.bottom - info.monitorInfo.rcWork.top).max(0) as u32,
+        }),
     });
     collector.next_id += 1;
     TRUE

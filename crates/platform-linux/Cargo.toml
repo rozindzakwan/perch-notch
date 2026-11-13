@@ -12,6 +12,8 @@ anyhow.workspace = true
 log.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+zbus = { workspace = true }
+ksni = { workspace = true }
 x11rb = { workspace = true, features = [
     "allow-unsafe-code",
     "randr",
@@ -19,4 +21,5 @@ x11rb = { workspace = true, features = [
     "xinput",
     "screensaver",
     "xtest",
+    "shape",
 ] }

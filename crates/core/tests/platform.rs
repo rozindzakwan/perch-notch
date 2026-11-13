@@ -19,6 +19,7 @@ fn fake_platform_reports_the_monitors_it_was_given() {
             height: 1080,
             scale: 1.0,
             primary: true,
+            work: None,
         },
         perch_core::geometry::Monitor {
             id: 1,
@@ -28,6 +29,7 @@ fn fake_platform_reports_the_monitors_it_was_given() {
             height: 1440,
             scale: 1.5,
             primary: false,
+            work: None,
         },
     ]);
     let monitors = match p.monitors() {

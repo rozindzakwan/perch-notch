@@ -48,6 +48,7 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 if (-not ([System.Management.Automation.PSTypeName]'PerchNative').Type) {
 Add-Type -Namespace '' -Name PerchNative -MemberDefinition @'
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll", SetLastError=true)] public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
@@ -135,16 +136,23 @@ function Move-MouseAbsolute([int]$X, [int]$Y) {
     $inp.type = 0  # INPUT_MOUSE
     $inp.mi = $mi
 
-    $sent = [PerchNative]::SendInput(1, @($inp), [System.Runtime.InteropServices.Marshal]::SizeOf($inp))
-    if ($sent -ne 1) { throw "SendInput failed (sent=$sent)" }
-
     # Verify the cursor really moved; a silent no-op would make every hover
-    # assertion below meaningless.
-    Start-Sleep -Milliseconds 120
-    $pos = [System.Windows.Forms.Cursor]::Position
-    if ([Math]::Abs($pos.X - $X) -gt 4 -or [Math]::Abs($pos.Y - $Y) -gt 4) {
-        throw "cursor did not reach ($X,$Y); it is at ($($pos.X),$($pos.Y))"
+    # assertion below meaningless. A human touching the mouse mid-test (or
+    # pointer acceleration rounding) can knock a single SendInput off target,
+    # so retry, falling back to SetCursorPos, which also produces the
+    # WM_MOUSEMOVE that hover detection relies on.
+    for ($attempt = 1; $attempt -le 4; $attempt++) {
+        if ($attempt -le 2) {
+            $sent = [PerchNative]::SendInput(1, @($inp), [System.Runtime.InteropServices.Marshal]::SizeOf($inp))
+            if ($sent -ne 1) { throw "SendInput failed (sent=$sent)" }
+        } else {
+            [void][PerchNative]::SetCursorPos($X, $Y)
+        }
+        Start-Sleep -Milliseconds 120
+        $pos = [System.Windows.Forms.Cursor]::Position
+        if ([Math]::Abs($pos.X - $X) -le 4 -and [Math]::Abs($pos.Y - $Y) -le 4) { return }
     }
+    throw "cursor did not reach ($X,$Y); it is at ($($pos.X),$($pos.Y))"
 }
 
 function Save-TopStripScreenshot([string]$Path) {
@@ -168,6 +176,14 @@ function Check([string]$Name, [bool]$Ok, [string]$Detail) {
 
 $cfg = Join-Path $env:TEMP 'perch-smoke-config.toml'
 Remove-Item $cfg -ErrorAction SilentlyContinue
+# Machine-readable state from the app, and an isolated data dir so the CLI
+# checks never touch the user's real to-dos.
+$statusFile = Join-Path $env:TEMP 'perch-smoke-status.json'
+Remove-Item $statusFile -ErrorAction SilentlyContinue
+$env:PERCH_STATUS_FILE = $statusFile
+$dataDir = Join-Path $env:TEMP 'perch-smoke-data'
+Remove-Item $dataDir -Recurse -Force -ErrorAction SilentlyContinue
+$env:PERCH_DATA_DIR = $dataDir
 
 Write-Host "=== Perch UI smoke test ==="
 Write-Host "exe: $Exe"
@@ -233,6 +249,48 @@ try {
     Check 'collapses_to_original' ($collapsed.H -eq $before.H) "back to $($before.H)px"
 
     Save-TopStripScreenshot (Join-Path $OutDir 'perch-collapsed.png')
+
+    # --- CLI verbs over the named pipe ---------------------------------------
+    function Invoke-Perch([string[]]$CliArgs) {
+        Start-Process -FilePath $Exe -ArgumentList $CliArgs -Wait -WindowStyle Hidden
+    }
+    function Read-Status { try { Get-Content $statusFile -Raw | ConvertFrom-Json } catch { $null } }
+    Invoke-Perch @('toggle-notch'); Start-Sleep -Milliseconds 900
+    $st = Read-Status
+    Check 'cli_toggle_pins_open' ($st.state -eq 'Expanded') "state $($st.state)"
+    Invoke-Perch @('toggle-notch'); Start-Sleep -Milliseconds 1000
+    $st = Read-Status
+    Check 'cli_toggle_closes' ($st.state -eq 'Collapsed') "state $($st.state)"
+    Invoke-Perch @('todo', 'smoke', 'test', 'item'); Start-Sleep -Milliseconds 600
+    $st = Read-Status
+    Check 'cli_todo' ($st.todos -eq 1) "todos=$($st.todos)"
+    Check 'first_frame_fast' ($st.first_frame_ms -lt 300) "first frame $($st.first_frame_ms) ms after process start (target < 300)"
+
+    # --- fullscreen auto-hide ------------------------------------------------
+    # A borderless window covering the monitor, brought to the foreground, is
+    # what games / video players / F11 look like to the shell.
+    $form = New-Object System.Windows.Forms.Form
+    $form.FormBorderStyle = 'None'
+    $form.StartPosition = 'Manual'
+    $form.Bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $form.BackColor = [System.Drawing.Color]::Black
+    $form.Show()
+    $form.Activate()
+    [PerchNative]::SetForegroundWindow($form.Handle) | Out-Null
+    for ($i = 0; $i -lt 10; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+    $isFg = ([PerchNative]::GetForegroundWindow() -eq $form.Handle)
+    $st = Read-Status
+    if ($isFg) {
+        Check 'fullscreen_hides' ($st.visible -eq $false) "visible=$($st.visible)"
+    } else {
+        Write-Host "[INFO] fullscreen_hides: skipped, Windows refused to give the test window the foreground (foreground lock)"
+        $results['fullscreen_hides'] = @{ ok = $true; detail = 'skipped: foreground lock' }
+    }
+    $form.Close(); $form.Dispose()
+    # The shell's quiet state lags; Perch re-checks 1.5 s after a focus change.
+    for ($i = 0; $i -lt 25; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+    $st = Read-Status
+    Check 'unfullscreen_shows' ($st.visible -eq $true) "visible=$($st.visible)"
 
     # --- focus must never move ----------------------------------------------
     $fgAfter = [PerchNative]::GetForegroundWindow()

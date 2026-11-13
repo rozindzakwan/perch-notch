@@ -22,7 +22,7 @@ impl Palette {
     /// Dark pill, the default look.
     pub fn dark() -> Self {
         Self {
-            bg: Color::from_rgba8(16, 17, 21, 235),
+            bg: Color::from_rgba8(16, 17, 21, 248),
             fg: Color::from_rgba8(242, 243, 247, 255),
             muted: Color::from_rgba8(150, 154, 166, 255),
             accent: Color::from_rgba8(255, 176, 66, 255),

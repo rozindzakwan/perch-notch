@@ -80,12 +80,15 @@ fn the_first_subcommand_wins_so_a_typo_cannot_change_the_action() {
 
 #[test]
 fn forwardable_commands_have_an_ipc_verb_and_local_ones_do_not() {
-    assert_eq!(Command::ToggleNotch.ipc_verb(), Some("toggle-notch"));
-    assert_eq!(Command::Shot.ipc_verb(), Some("shot"));
-    assert_eq!(Command::Dictate.ipc_verb(), Some("dictate"));
-    assert_eq!(Command::Pomodoro.ipc_verb(), Some("pomodoro"));
-    assert_eq!(Command::Settings.ipc_verb(), Some("settings"));
-    assert_eq!(Command::Quit.ipc_verb(), Some("quit"));
+    assert_eq!(
+        Command::ToggleNotch.ipc_verb(),
+        Some("toggle-notch".to_string())
+    );
+    assert_eq!(Command::Shot.ipc_verb(), Some("shot".to_string()));
+    assert_eq!(Command::Dictate.ipc_verb(), Some("dictate".to_string()));
+    assert_eq!(Command::Pomodoro.ipc_verb(), Some("pomodoro".to_string()));
+    assert_eq!(Command::Settings.ipc_verb(), Some("settings".to_string()));
+    assert_eq!(Command::Quit.ipc_verb(), Some("quit".to_string()));
     assert_eq!(Command::Run.ipc_verb(), None);
     assert_eq!(Command::Version.ipc_verb(), None);
     assert_eq!(Command::Help.ipc_verb(), None);

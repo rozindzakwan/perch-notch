@@ -12,12 +12,16 @@ pub mod error;
 pub mod geometry;
 pub mod lrc;
 pub mod media;
+pub mod noise;
 pub mod notch;
 pub mod platform;
 pub mod pomodoro;
 pub mod reminders;
+pub mod shelf;
 pub mod todo;
+pub mod tz;
 pub mod usage;
+pub mod view;
 
 pub use error::{Error, Result};
 

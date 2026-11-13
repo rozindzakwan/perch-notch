@@ -13,6 +13,7 @@ fn mon_1080p() -> Monitor {
         height: 1080,
         scale: 1.0,
         primary: true,
+        work: None,
     }
 }
 
@@ -182,6 +183,7 @@ fn geometry_scales_with_hidpi_factor() {
         height: 2160,
         scale: 2.0,
         primary: true,
+        work: None,
     };
     let r = notch_rect(&hidpi, NotchPosition::TopCenter, &geo, false);
     assert_eq!(r.w, 400, "logical 200 at scale 2 = 400 physical px");
@@ -205,6 +207,7 @@ fn secondary_monitor_offset_is_honored() {
         height: 1080,
         scale: 1.0,
         primary: false,
+        work: None,
     };
     let r = notch_rect(&right, NotchPosition::TopCenter, &geo, false);
     assert_eq!(r.x, 1920 + (1920 - 200) / 2);

@@ -7,11 +7,13 @@
 //! their `unsafe` blocks and document each one.
 
 pub mod art;
+pub mod form;
 pub mod render;
 pub mod shell;
 pub mod text;
 pub mod theme;
 
+pub use form::{Field, FormEvent, FormSpec, FormState, FormWindow};
 pub use render::{Collapsed, Frame, Renderer};
 pub use shell::{NotchWindows, ShellEvent};
 pub use theme::Palette;

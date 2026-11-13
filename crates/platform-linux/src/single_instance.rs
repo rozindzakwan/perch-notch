@@ -5,10 +5,10 @@
 //! the same path. A stale socket (left by a crash) is detected by trying to
 //! connect first, which is the standard safe recovery.
 
+use perch_core::platform::{EventSink, PlatformEvent};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
 
 use perch_core::error::{Error, Result};
 use perch_core::platform::SingleInstance;
@@ -34,11 +34,12 @@ fn socket_path() -> Result<PathBuf> {
 }
 
 impl UnixSocketInstance {
-    /// Serve CLI commands, forwarding each received line to `tx`.
+    /// Serve CLI commands, delivering each received line to `sink` as a
+    /// [`PlatformEvent::Command`].
     ///
     /// One blocking accept loop on its own thread; idle cost is zero because
     /// `accept` blocks in the kernel.
-    pub fn serve(&mut self, tx: Sender<String>) -> Result<()> {
+    pub fn serve(&mut self, sink: EventSink) -> Result<()> {
         let listener = match self.listener.take() {
             Some(l) => l,
             None => {
@@ -59,7 +60,7 @@ impl UnixSocketInstance {
                                     Ok(line) => {
                                         let line = line.trim().to_string();
                                         if !line.is_empty() {
-                                            let _ = tx.send(line);
+                                            sink(PlatformEvent::Command(line));
                                         }
                                     }
                                     Err(e) => {

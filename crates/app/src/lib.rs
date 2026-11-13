@@ -1,12 +1,23 @@
 #![forbid(unsafe_code)]
-//! Perch's application layer: CLI, the event loop that wires the platform
-//! backends to the notch state machine and the renderer, and the feature
-//! coordinators.
+//! Perch's application layer: CLI, the model that holds every feature's
+//! state, the winit shell that wires the platform backends to the notch, and
+//! the feature coordinators.
 //!
 //! Everything OS-specific is reached through the traits in
-//! `perch_core::platform`, so this crate contains no `unsafe` and no Win32 or
-//! X11 types.
+//! `perch_core::platform` (wired up in [`glue`]), so this crate contains no
+//! `unsafe` and no Win32 or X11 types.
 
-pub mod app;
+pub mod backends;
 pub mod cli;
+pub mod extras;
 pub mod features;
+pub mod forms;
+pub mod glue;
+pub mod icon;
+pub mod lyrics;
+pub mod model;
+pub mod persist;
+pub mod shell;
+pub mod sys;
+#[cfg(windows)]
+pub mod tray;

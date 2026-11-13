@@ -64,7 +64,10 @@ pub struct Notch {
     collapse_delay: Duration,
     /// Time left before a pending collapse starts; `None` = none pending.
     pending_collapse: Option<Duration>,
-    pointer_inside: bool,
+    /// Pointer is over the hover strip.
+    in_hot: bool,
+    /// Pointer is over the pill.
+    in_pill: bool,
     fullscreen: bool,
     pinned: bool,
 }
@@ -79,10 +82,15 @@ impl Notch {
             collapse_duration: animation,
             collapse_delay,
             pending_collapse: None,
-            pointer_inside: false,
+            in_hot: false,
+            in_pill: false,
             fullscreen: false,
             pinned: false,
         }
+    }
+
+    fn inside(&self) -> bool {
+        self.in_hot || self.in_pill
     }
 
     /// Current state.
@@ -143,8 +151,12 @@ impl Notch {
     pub fn handle(&mut self, event: NotchEvent) -> bool {
         match event {
             NotchEvent::HotZoneEntered | NotchEvent::PointerEntered => {
-                let was_inside = self.pointer_inside;
-                self.pointer_inside = true;
+                let was_inside = self.inside();
+                if event == NotchEvent::HotZoneEntered {
+                    self.in_hot = true;
+                } else {
+                    self.in_pill = true;
+                }
                 self.pending_collapse = None;
                 if !self.is_visible() {
                     // Remember the hover; it is honored when fullscreen ends.
@@ -153,8 +165,18 @@ impl Notch {
                 self.start_expanding()
             }
             NotchEvent::HotZoneLeft | NotchEvent::PointerLeft => {
-                let was_inside = self.pointer_inside;
-                self.pointer_inside = false;
+                let was_inside = self.inside();
+                if event == NotchEvent::HotZoneLeft {
+                    self.in_hot = false;
+                } else {
+                    self.in_pill = false;
+                }
+                // Enter/leave pairs between the strip and the pill can arrive
+                // in either order (Windows delivers the pill's enter before
+                // the strip's leave). Only leaving *both* means leaving.
+                if self.inside() {
+                    return false;
+                }
                 if self.pinned {
                     return was_inside;
                 }
@@ -180,7 +202,7 @@ impl Notch {
                     self.state = NotchState::Collapsed;
                     self.t = 0.0;
                     self.pending_collapse = None;
-                } else if self.pointer_inside || self.pinned {
+                } else if self.inside() || self.pinned {
                     self.start_expanding();
                 }
                 true
@@ -193,14 +215,15 @@ impl Notch {
                         return true;
                     }
                     self.start_expanding();
-                } else if !self.pointer_inside {
+                } else if !self.inside() {
                     self.start_collapsing();
                 }
                 true
             }
             NotchEvent::ForceCollapse => {
                 self.pinned = false;
-                self.pointer_inside = false;
+                self.in_hot = false;
+                self.in_pill = false;
                 self.pending_collapse = None;
                 self.start_collapsing()
             }

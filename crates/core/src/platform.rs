@@ -96,8 +96,90 @@ pub enum PlatformEvent {
     IdleChanged(bool),
     /// The monitor layout changed; placement must be recomputed.
     MonitorsChanged,
-    /// The clipboard received new content.
+    /// The clipboard received new content. The app re-reads it through
+    /// [`ClipboardAccess`]; the event itself carries nothing so it stays cheap.
     ClipboardChanged,
+    /// The config file was written (by the user, an editor, or the settings
+    /// window); the app reloads it.
+    ConfigFileChanged,
+    /// The set of audio sessions or one of their volumes changed; the app
+    /// re-reads them through [`AudioMixer`].
+    AudioSessionsChanged,
+    /// A registered global hotkey went down (`pressed = true`) or up.
+    Hotkey {
+        /// The id the hotkey was registered under (e.g. `"dictate"`).
+        id: String,
+        /// Press or release.
+        pressed: bool,
+    },
+    /// The session was locked or unlocked (counts as idle for reminders).
+    SessionLocked(bool),
+    /// A file was dropped onto the notch.
+    FileDropped(std::path::PathBuf),
+    /// The window manager started or was replaced (e.g. "Restart Cinnamon");
+    /// window-manager-owned state such as keep-above must be requested again.
+    WindowManagerChanged,
+}
+
+/// Where backends deliver [`PlatformEvent`]s. The app wraps winit's
+/// `EventLoopProxy` in one of these, so an event from any backend thread wakes
+/// the (otherwise fully idle) event loop immediately.
+pub type EventSink = std::sync::Arc<dyn Fn(PlatformEvent) + Send + Sync>;
+
+/// One application's audio session, as the mixer shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioSession {
+    /// Backend-stable id (WASAPI session instance id / Pulse sink-input index).
+    pub id: String,
+    /// Display name (process name or `application.name`).
+    pub name: String,
+    /// Volume 0.0 ..= 1.0.
+    pub volume: f32,
+    /// Muted.
+    pub muted: bool,
+}
+
+/// Per-application volume control.
+pub trait AudioMixer {
+    /// Current sessions, loudest/most relevant first is not required.
+    fn sessions(&mut self) -> Result<Vec<AudioSession>>;
+    /// Set one session's volume (clamped to 0..=1 by the caller).
+    fn set_volume(&mut self, id: &str, volume: f32) -> Result<()>;
+    /// Mute or unmute one session.
+    fn set_mute(&mut self, id: &str, muted: bool) -> Result<()>;
+}
+
+/// Reading and writing the system clipboard.
+pub trait ClipboardAccess {
+    /// Read the current clipboard content plus the flags (password-manager
+    /// hints, source app) used to decide whether it may be recorded. `None`
+    /// when the clipboard holds nothing Perch understands.
+    fn read(
+        &mut self,
+    ) -> Result<
+        Option<(
+            crate::clipboard::ClipboardContent,
+            crate::clipboard::ContentFlags,
+        )>,
+    >;
+    /// Put content on the clipboard.
+    fn write(&mut self, content: &crate::clipboard::ClipboardContent) -> Result<()>;
+    /// Put a list of files on the clipboard (so they can be pasted in a file
+    /// manager).
+    fn write_files(&mut self, paths: &[std::path::PathBuf]) -> Result<()>;
+}
+
+/// How long the user has been idle. Queried once per reminder deadline (never
+/// on a timer loop), so it may be a cheap synchronous call.
+pub trait IdleSource {
+    /// Time since the last keyboard/mouse input.
+    fn idle_for(&self) -> Result<Duration>;
+}
+
+/// Opening files and folders with the desktop's default handler.
+pub trait Opener {
+    /// Open a file or folder.
+    fn open(&self, path: &std::path::Path) -> Result<()>;
 }
 
 /// Enumerates monitors and picks the one the notch should live on.

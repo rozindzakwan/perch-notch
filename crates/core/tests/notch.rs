@@ -47,6 +47,7 @@ fn leaving_the_pill_collapses_after_the_delay() {
     n.advance(Duration::from_millis(200));
     assert_eq!(n.state(), NotchState::Expanded);
 
+    n.handle(NotchEvent::HotZoneLeft);
     n.handle(NotchEvent::PointerLeft);
     assert_eq!(
         n.state(),
@@ -105,6 +106,7 @@ fn re_entering_during_collapse_cancels_it_without_a_jump() {
     let mut n = notch();
     n.handle(NotchEvent::HotZoneEntered);
     n.advance(Duration::from_millis(200));
+    n.handle(NotchEvent::HotZoneLeft);
     n.handle(NotchEvent::PointerLeft);
     // 200ms delay + 50ms of the 200ms collapse animation: the delay and the
     // animation share one tick, so we land a quarter of the way shut.
@@ -129,6 +131,7 @@ fn the_collapse_delay_does_not_eat_the_collapse_animation() {
     let mut n = notch();
     n.handle(NotchEvent::HotZoneEntered);
     n.advance(Duration::from_millis(200));
+    n.handle(NotchEvent::HotZoneLeft);
     n.handle(NotchEvent::PointerLeft);
     n.advance(Duration::from_millis(210)); // delay + 10ms
     assert_eq!(n.state(), NotchState::Collapsing);
@@ -144,6 +147,7 @@ fn pointer_entering_the_pill_cancels_a_pending_collapse() {
     let mut n = notch();
     n.handle(NotchEvent::HotZoneEntered);
     n.advance(Duration::from_millis(200));
+    n.handle(NotchEvent::HotZoneLeft);
     n.handle(NotchEvent::PointerLeft);
     n.advance(Duration::from_millis(100));
     n.handle(NotchEvent::PointerEntered);
@@ -200,6 +204,7 @@ fn toggle_opens_and_closes_regardless_of_the_pointer() {
     assert_eq!(n.state(), NotchState::Expanded);
     assert!(n.is_pinned(), "a toggled-open notch stays open");
 
+    n.handle(NotchEvent::HotZoneLeft);
     n.handle(NotchEvent::PointerLeft);
     n.advance(Duration::from_millis(1000));
     assert_eq!(
@@ -265,6 +270,7 @@ fn next_deadline_is_none_when_idle_so_the_loop_can_sleep_forever() {
     n.advance(Duration::from_millis(200));
     assert_eq!(n.next_deadline(), None, "expanded and idle: no wakeups");
 
+    n.handle(NotchEvent::HotZoneLeft);
     n.handle(NotchEvent::PointerLeft);
     assert!(
         n.next_deadline().is_some(),
@@ -284,4 +290,34 @@ fn repeated_identical_events_do_not_report_changes() {
         !n.handle(NotchEvent::FullscreenChanged(false)),
         "already not fullscreen"
     );
+}
+
+#[test]
+fn strip_to_pill_handover_works_in_either_event_order() {
+    use perch_core::notch::{Notch, NotchEvent, NotchState};
+    use std::time::Duration;
+    for pill_enter_first in [false, true] {
+        let mut n = Notch::new(Duration::from_millis(100), Duration::from_millis(200));
+        n.handle(NotchEvent::HotZoneEntered);
+        n.advance(Duration::from_millis(150));
+        assert_eq!(n.state(), NotchState::Expanded);
+        if pill_enter_first {
+            // Windows: the growing pill reports its enter before the strip's leave.
+            n.handle(NotchEvent::PointerEntered);
+            n.handle(NotchEvent::HotZoneLeft);
+        } else {
+            n.handle(NotchEvent::HotZoneLeft);
+            n.handle(NotchEvent::PointerEntered);
+        }
+        n.advance(Duration::from_secs(2));
+        assert_eq!(
+            n.state(),
+            NotchState::Expanded,
+            "cursor still on the pill (pill_enter_first={pill_enter_first})"
+        );
+        n.handle(NotchEvent::HotZoneLeft);
+        n.handle(NotchEvent::PointerLeft);
+        n.advance(Duration::from_secs(2));
+        assert_eq!(n.state(), NotchState::Collapsed);
+    }
 }

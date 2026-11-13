@@ -5,8 +5,8 @@
 //! and exit. A named mutex guards the race so two simultaneous launches cannot
 //! both decide they are first.
 
+use perch_core::platform::{EventSink, PlatformEvent};
 use std::io::{Read, Write};
-use std::sync::mpsc::Sender;
 
 use perch_core::error::{Error, Result};
 use perch_core::platform::SingleInstance;
@@ -36,31 +36,43 @@ impl Drop for NamedPipeInstance {
 }
 
 impl NamedPipeInstance {
-    /// Start serving CLI commands, forwarding each received line to `tx`.
+    /// Start serving CLI commands, delivering each received line to `sink` as
+    /// a [`PlatformEvent::Command`].
     ///
     /// Spawns one blocking thread that waits on client connections; it costs no
     /// CPU while idle because `ConnectNamedPipe` blocks in the kernel.
-    pub fn serve(&self, tx: Sender<String>) -> Result<()> {
+    pub fn serve(&self, sink: EventSink) -> Result<()> {
         std::thread::Builder::new()
             .name("perch-ipc".into())
             .spawn(move || {
-                loop {
-                    match serve_one(&tx) {
-                        Ok(()) => {}
+                // ConnectNamedPipe blocks in the kernel, so a healthy server
+                // costs nothing while idle. On errors we back off, and after a
+                // run of consecutive failures we stop instead of retrying
+                // forever: a permanently broken pipe must not become a
+                // polling loop. The CLI then reports "not running".
+                let mut failures = 0u32;
+                while failures < 20 {
+                    match serve_one(&sink) {
+                        Ok(()) => failures = 0,
                         Err(e) => {
+                            failures += 1;
                             log::debug!("ipc server: {e}");
-                            // Avoid a hot loop if the pipe is permanently broken.
-                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            std::thread::sleep(std::time::Duration::from_millis(
+                                100 * u64::from(failures),
+                            ));
                         }
                     }
                 }
+                log::warn!(
+                    "IPC server gave up after repeated failures; CLI commands are unavailable"
+                );
             })
             .map_err(|e| Error::io("spawning the IPC thread", e))?;
         Ok(())
     }
 }
 
-fn serve_one(tx: &Sender<String>) -> Result<()> {
+fn serve_one(sink: &EventSink) -> Result<()> {
     use std::os::windows::io::FromRawHandle;
 
     use windows::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
@@ -118,7 +130,7 @@ fn serve_one(tx: &Sender<String>) -> Result<()> {
             for line in buf.lines() {
                 let line = line.trim();
                 if !line.is_empty() {
-                    let _ = tx.send(line.to_string());
+                    sink(PlatformEvent::Command(line.to_string()));
                 }
             }
             Ok(())

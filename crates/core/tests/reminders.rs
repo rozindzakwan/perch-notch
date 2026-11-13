@@ -267,3 +267,36 @@ fn many_small_ticks_match_one_big_tick_for_the_water_timer() {
     assert_eq!(fired, 1, "60 one-minute ticks produce exactly one reminder");
     assert_eq!(small.remaining(ReminderKind::Water), Some(mins(60)));
 }
+
+#[test]
+fn postpone_to_caps_at_the_interval_and_floors_at_one_second() {
+    use perch_core::config::RemindersConfig;
+    use perch_core::reminders::{ReminderKind, Reminders};
+    use std::time::Duration;
+    let mut r = Reminders::new(RemindersConfig {
+        water_minutes: 0,
+        stretch_minutes: 45,
+        idle_threshold_seconds: 120,
+    });
+    r.postpone_to(ReminderKind::Stretch, Duration::from_secs(600));
+    assert_eq!(
+        r.remaining(ReminderKind::Stretch),
+        Some(Duration::from_secs(600))
+    );
+    r.postpone_to(ReminderKind::Stretch, Duration::from_secs(99_999));
+    assert_eq!(
+        r.remaining(ReminderKind::Stretch),
+        Some(Duration::from_secs(45 * 60))
+    );
+    r.postpone_to(ReminderKind::Stretch, Duration::ZERO);
+    assert_eq!(
+        r.remaining(ReminderKind::Stretch),
+        Some(Duration::from_secs(1))
+    );
+    r.postpone_to(ReminderKind::Water, Duration::from_secs(5));
+    assert_eq!(
+        r.remaining(ReminderKind::Water),
+        None,
+        "disabled stays disabled"
+    );
+}

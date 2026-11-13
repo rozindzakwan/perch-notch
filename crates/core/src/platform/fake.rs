@@ -64,6 +64,7 @@ fn default_monitors() -> Vec<Monitor> {
         height: 1080,
         scale: 1.0,
         primary: true,
+        work: None,
     }]
 }
 
