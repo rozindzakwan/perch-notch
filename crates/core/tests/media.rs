@@ -355,3 +355,73 @@ fn an_idle_state_is_never_the_same_track() {
         "with no current track, anything is new"
     );
 }
+
+#[test]
+fn a_degraded_no_player_state_answers_every_query_without_panicking() {
+    let mut state = MediaState::new();
+    // Every accessor on the empty/degraded state.
+    assert!(state.track().is_none());
+    assert!(state.is_idle());
+    assert!(!state.is_playing());
+    assert!(state.track_token().is_none());
+    assert!(state.position_at(Duration::from_secs(99)).is_none());
+    assert!(state.progress_fraction().is_none());
+    assert!(state.seek_target(0.5).is_none());
+    assert!(state.label().is_none());
+    // And every event applied to it.
+    for event in [
+        MediaEvent::PlaybackChanged(true),
+        MediaEvent::PlaybackChanged(false),
+        MediaEvent::PositionChanged(Duration::from_secs(5)),
+        MediaEvent::Gone,
+    ] {
+        assert!(
+            !state.apply(&event),
+            "{event:?} changed nothing on an idle state"
+        );
+        assert!(state.is_idle());
+    }
+}
+
+#[test]
+fn is_playing_follows_the_track_and_is_false_when_idle() {
+    let mut state = sail();
+    assert!(state.is_playing());
+    state.apply(&MediaEvent::PlaybackChanged(false));
+    assert!(!state.is_playing());
+    state.apply(&MediaEvent::Gone);
+    assert!(!state.is_playing(), "no player is not playing");
+}
+
+#[test]
+fn label_is_the_tracks_display_label() {
+    let state = sail();
+    assert_eq!(state.label(), Some("Awolnation - Sail".to_string()));
+}
+
+#[test]
+fn an_empty_track_from_a_backend_is_accepted_without_panicking() {
+    // Some backends briefly report a blank track; it must be representable.
+    let mut state = MediaState::new();
+    assert!(state.apply(&MediaEvent::TrackChanged(Track::default())));
+    assert!(!state.is_idle(), "a blank track is still a track");
+    assert!(state.progress_fraction().is_none());
+    assert!(state.seek_target(0.5).is_none());
+    assert_eq!(
+        state.position_at(Duration::from_secs(3)),
+        Some(Duration::ZERO)
+    );
+}
+
+#[test]
+fn a_track_change_resets_the_position_estimate_to_the_new_report() {
+    let mut state = sail();
+    let mut next = track("Megalithic Symphony", "Awolnation", "Megalithic");
+    next.position = Some(Duration::from_secs(1));
+    state.apply(&MediaEvent::TrackChanged(next));
+    assert_eq!(
+        state.position_at(Duration::from_secs(2)),
+        Some(Duration::from_secs(3)),
+        "the estimate is based on the NEW track's report, not the old one"
+    );
+}

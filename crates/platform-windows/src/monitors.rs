@@ -3,7 +3,7 @@
 use perch_core::error::{Error, Result};
 use perch_core::geometry::Monitor;
 use perch_core::platform::MonitorSource;
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT, TRUE};
+use windows::Win32::Foundation::{BOOL, LPARAM, POINT, RECT, TRUE};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
 };
@@ -120,12 +120,4 @@ pub fn monitor_under_cursor() -> Result<Option<u32>> {
     }
     let monitors = WindowsMonitors.monitors()?;
     Ok(perch_core::geometry::monitor_at(&monitors, pt.x, pt.y).map(|m| m.id))
-}
-
-/// Whether the given window handle is currently the foreground window.
-pub(crate) fn is_foreground(hwnd: HWND) -> bool {
-    // SAFETY: GetForegroundWindow takes no arguments and returns a handle we
-    // only compare; no dereference happens.
-    let fg = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
-    fg == hwnd
 }

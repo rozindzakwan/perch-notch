@@ -16,7 +16,7 @@
 
 use std::time::Duration;
 
-use crate::platform::{MediaEvent, Track};
+use crate::platform::{MediaEvent, Track, TransportCommand};
 
 /// Identity of a track for "is this a different song?" purposes.
 ///
@@ -74,6 +74,16 @@ impl MediaState {
     /// away). This is the degraded state and is always safe to be in.
     pub fn is_idle(&self) -> bool {
         self.track.is_none()
+    }
+
+    /// Whether a track is currently playing. `false` when idle.
+    pub fn is_playing(&self) -> bool {
+        self.track.as_ref().is_some_and(|t| t.playing)
+    }
+
+    /// `"Artist - Title"` for the current track, or `None` when idle.
+    pub fn label(&self) -> Option<String> {
+        self.track.as_ref().map(Track::label)
     }
 
     /// Fold an event into the state, returning `true` when something the UI
@@ -137,5 +147,22 @@ impl MediaState {
         }
         let position = track.position.unwrap_or(Duration::ZERO).min(duration);
         Some(position.as_secs_f64() / duration.as_secs_f64())
+    }
+
+    /// Turn a click at `fraction` of the seek bar into a [`TransportCommand`].
+    ///
+    /// `fraction` is clamped to `0.0..=1.0` (NaN is treated as `0.0`, since
+    /// `f64::clamp` would panic on it). Returns `None` when the duration is
+    /// unknown, because there is nothing to seek within.
+    pub fn seek_target(&self, fraction: f64) -> Option<TransportCommand> {
+        let duration = self.track.as_ref()?.duration?;
+        // Hand-rolled clamp: `f64::clamp` panics on NaN, and NaN here would
+        // otherwise produce a garbage seek.
+        let clamped = if fraction.is_nan() {
+            0.0
+        } else {
+            fraction.clamp(0.0, 1.0)
+        };
+        Some(TransportCommand::SeekTo(duration.mul_f64(clamped)))
     }
 }
