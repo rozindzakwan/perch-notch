@@ -1,0 +1,29 @@
+[package]
+name = "perch-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Perch rendering and window shell (winit + softbuffer + tiny-skia)"
+
+[dependencies]
+perch-core = { path = "../core" }
+anyhow.workspace = true
+log.workspace = true
+winit.workspace = true
+softbuffer.workspace = true
+tiny-skia.workspace = true
+fontdue.workspace = true
+raw-window-handle.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+perch-platform-windows = { path = "../platform-windows" }
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+perch-platform-linux = { path = "../platform-linux" }
+x11rb = { workspace = true }

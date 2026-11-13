@@ -1,0 +1,25 @@
+[package]
+name = "perch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Perch - a lightweight dynamic notch / island for Windows and Linux"
+default-run = "perch"
+
+[[bin]]
+name = "perch"
+path = "src/main.rs"
+
+[dependencies]
+perch-core = { path = "../core" }
+perch-ui = { path = "../ui" }
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+perch-platform-windows = { path = "../platform-windows" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+perch-platform-linux = { path = "../platform-linux" }

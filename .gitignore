@@ -1,0 +1,9 @@
+/target
+**/target
+*.tmp
+*.toml.tmp
+mint-results.md
+/dist
+/artifacts
+perch-shot-*.png
+soak-*.csv

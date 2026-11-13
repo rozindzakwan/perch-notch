@@ -1,0 +1,2 @@
+# Keep the bar high: these are the lints we care most about enforcing.
+too-many-arguments-threshold = 9

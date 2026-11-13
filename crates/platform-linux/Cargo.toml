@@ -1,0 +1,15 @@
+[package]
+name = "perch-platform-linux"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Linux (X11 primary, Wayland best-effort) backends for Perch"
+
+[dependencies]
+perch-core = { path = "../core" }
+anyhow.workspace = true
+log.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { workspace = true, features = ["allow-unsafe-code", "xfixes", "xinput", "screensaver"] }

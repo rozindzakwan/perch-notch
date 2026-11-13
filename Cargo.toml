@@ -1,0 +1,61 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/platform-windows",
+    "crates/platform-linux",
+    "crates/ui",
+    "crates/app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.78"
+license = "MIT OR Apache-2.0"
+authors = ["Perch contributors"]
+repository = "https://github.com/rozindzakwan/perch"
+description = "Perch - a lightweight dynamic notch / island for Windows and Linux"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+directories = "5"
+log = "0.4"
+env_logger = "0.11"
+notify = { version = "6", default-features = false, features = ["macos_fsevent"] }
+async-channel = "2"
+ureq = { version = "2", default-features = false, features = ["tls", "gzip"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+winit = "0.30"
+softbuffer = "0.4"
+tiny-skia = "0.11"
+fontdue = "0.9"
+raw-window-handle = "0.6"
+tray-icon = { version = "0.19", default-features = false }
+global-hotkey = "0.6"
+arboard = { version = "3", default-features = false }
+rodio = { version = "0.19", default-features = false }
+zbus = { version = "4", default-features = false, features = ["tokio"] }
+x11rb = "0.13"
+proptest = "1"
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release-small]
+inherits = "release"
+opt-level = "s"
+
+# Tests need unwinding, so keep the test profile on panic=unwind.
+[profile.test]
+opt-level = 1
