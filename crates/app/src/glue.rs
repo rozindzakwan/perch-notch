@@ -122,11 +122,15 @@ impl Services {
             .active_window
             .store(features.is_active(Feature::ScreenTime), Ordering::Relaxed);
         self.os.refresh();
+        self.os.set_lock_watch(
+            features.is_active(Feature::Reminders) || features.is_active(Feature::ScreenTime),
+            &self.sink,
+        );
 
         let want_clipboard =
             features.is_active(Feature::Clipboard) || features.is_active(Feature::Shelf);
         if want_clipboard && self.clipboard.is_none() {
-            match os::clipboard() {
+            match self.os.clipboard() {
                 Ok(c) => self.clipboard = Some(c),
                 Err(e) => log::warn!("clipboard unavailable: {e}"),
             }
@@ -247,10 +251,9 @@ mod os {
 
         /// Windows has no WM-owned state to re-assert.
         pub fn track_notch_windows(&self, _ids: &[u32]) {}
-    }
 
-    pub fn clipboard() -> Result<Box<dyn ClipboardAccess>> {
-        crate::backends::clipboard()
+        /// Lock/unlock already arrives through the event thread (WTS).
+        pub fn set_lock_watch(&mut self, _on: bool, _sink: &EventSink) {}
     }
 
     pub fn media(sink: EventSink) -> Result<Box<dyn MediaControl>> {
@@ -259,6 +262,12 @@ mod os {
 
     pub fn mixer(sink: EventSink) -> Result<Box<dyn AudioMixer>> {
         crate::backends::mixer(sink)
+    }
+
+    impl OsServices {
+        pub fn clipboard(&self) -> Result<Box<dyn ClipboardAccess>> {
+            Ok(Box::new(win::WindowsClipboard::new()?))
+        }
     }
 }
 
@@ -278,6 +287,7 @@ mod os {
         flags: Arc<lx::x11::WatchFlags>,
         watcher: Option<lx::x11::X11Watcher>,
         tray: Option<lx::tray::TrayHandle>,
+        lock: Option<lx::screensaver::LockWatch>,
     }
 
     pub fn base(sink: EventSink) -> BaseParts {
@@ -302,6 +312,7 @@ mod os {
                 flags,
                 watcher,
                 tray: None,
+                lock: None,
             },
         }
     }
@@ -338,10 +349,18 @@ mod os {
                 w.track_notch_windows(ids);
             }
         }
-    }
 
-    pub fn clipboard() -> Result<Box<dyn ClipboardAccess>> {
-        crate::backends::clipboard()
+        /// Start or stop the screensaver lock watcher.
+        pub fn set_lock_watch(&mut self, on: bool, sink: &EventSink) {
+            if on && self.lock.is_none() {
+                match lx::screensaver::LockWatch::start(sink.clone()) {
+                    Ok(l) => self.lock = Some(l),
+                    Err(e) => log::info!("screen-lock events unavailable: {e}"),
+                }
+            } else if !on {
+                self.lock = None;
+            }
+        }
     }
 
     pub fn media(sink: EventSink) -> Result<Box<dyn MediaControl>> {
@@ -350,5 +369,13 @@ mod os {
 
     pub fn mixer(sink: EventSink) -> Result<Box<dyn AudioMixer>> {
         crate::backends::mixer(sink)
+    }
+
+    impl OsServices {
+        pub fn clipboard(&self) -> Result<Box<dyn ClipboardAccess>> {
+            Ok(Box::new(lx::clipboard::X11Clipboard::new(
+                self.flags.clone(),
+            )?))
+        }
     }
 }

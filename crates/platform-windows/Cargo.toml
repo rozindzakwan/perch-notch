@@ -12,7 +12,12 @@ anyhow.workspace = true
 log.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+arboard.workspace = true
+windows-core = "0.58"
+image = { workspace = true }
 windows = { version = "0.58", features = [
+    "implement",
+    "Win32_UI_Shell_Common",
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Shell",
@@ -45,3 +50,6 @@ windows = { version = "0.58", features = [
     "UI_Notifications",
     "Data_Xml_Dom",
 ] }
+
+[dev-dependencies]
+perch-core = { path = "../core" }

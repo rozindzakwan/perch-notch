@@ -159,3 +159,27 @@ clock.
 - **Idle RSS grew 26 MB after opening settings (Linux).** glibc kept the freed
   frame buffers. Forms reuse their pixmap and Perch calls `malloc_trim` after
   closing a form.
+- **The notch hid on startup with no fullscreen app.** Windows reported the
+  shell state `QUNS_BUSY` with nothing fullscreen in front (overlay software
+  was running) and kept reporting it after fullscreen windows closed. Perch now
+  trusts only `QUNS_RUNNING_D3D_FULL_SCREEN` and `QUNS_PRESENTATION_MODE` from
+  the shell; borderless fullscreen is caught by the geometry rule.
+
+## ADR-012: Clipboard privacy is decided before content is read
+
+Windows: the clipboard listener's change triggers a check of
+`ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`
+and `CanUploadToCloudClipboard` before `arboard` reads anything. X11: the
+watcher answers each CLIPBOARD owner change (XFixes) by requesting the owner's
+`TARGETS` itself and emits `ClipboardChanged` only when
+`x-kde-passwordManagerHint` is absent, so a password-manager copy is never
+even signalled. History lives in memory only and is cleared when the feature
+is turned off. Both paths are covered by end-to-end smoke checks.
+
+## ADR-013: Shelf drag-out
+
+Windows uses an OLE drag source over the shell's own data object for the files
+(`IShellItemArray` → `BHID_DataObject`), so every drop target that understands
+Explorer drags works. Linux has no drag-out (an XDND source is a lot of
+protocol for little gain); clicking a shelf item copies it as a file to the
+clipboard (`text/uri-list` via `arboard`), which file managers paste.

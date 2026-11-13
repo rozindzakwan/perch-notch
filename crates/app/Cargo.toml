@@ -32,7 +32,7 @@ ureq = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
 
 [features]
-default = ["media", "lyrics", "productivity"]
+default = ["media", "lyrics", "productivity", "clipboard"]
 # Optional features are compile-time gated as well as config-gated, so a build
 # without them does not contain their code at all.
 media = []

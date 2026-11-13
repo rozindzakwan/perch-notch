@@ -4,15 +4,7 @@
 
 #[allow(unused_imports)]
 use perch_core::error::{Error, Result};
-use perch_core::platform::{AudioMixer, ClipboardAccess, EventSink, MediaControl};
-
-/// Clipboard read/write.
-pub fn clipboard() -> Result<Box<dyn ClipboardAccess>> {
-    Err(Error::unavailable(
-        "clipboard",
-        "not implemented in this build yet",
-    ))
-}
+use perch_core::platform::{AudioMixer, EventSink, MediaControl};
 
 /// Now-playing: SMTC on Windows, MPRIS on Linux.
 pub fn media(sink: EventSink) -> Result<Box<dyn MediaControl>> {

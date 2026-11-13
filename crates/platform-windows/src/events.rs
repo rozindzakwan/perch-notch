@@ -37,7 +37,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
 use windows::Win32::UI::Shell::{
-    SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN,
+    SHQueryUserNotificationState, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetClassNameW,
@@ -512,10 +512,11 @@ pub fn is_fullscreen_now(monitors: &[Monitor]) -> bool {
 pub fn fullscreen_reason(monitors: &[Monitor]) -> Option<String> {
     // SAFETY: single out-param, no other side effects.
     if let Ok(state) = unsafe { SHQueryUserNotificationState() } {
-        if state == QUNS_RUNNING_D3D_FULL_SCREEN
-            || state == QUNS_PRESENTATION_MODE
-            || state == QUNS_BUSY
-        {
+        // QUNS_BUSY is deliberately ignored: it is reported with no
+        // fullscreen app in front at all (seen with overlay software
+        // running), and it lingers after a fullscreen window closes.
+        // Borderless fullscreen is caught by the geometry check below.
+        if state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE {
             return Some(format!("shell notification state {}", state.0));
         }
     }

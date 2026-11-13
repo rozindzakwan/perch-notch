@@ -13,6 +13,8 @@ log.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { workspace = true }
+arboard.workspace = true
+image = { workspace = true }
 ksni = { workspace = true }
 x11rb = { workspace = true, features = [
     "allow-unsafe-code",

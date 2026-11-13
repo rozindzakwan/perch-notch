@@ -15,7 +15,11 @@ pub mod autostart;
 // Pure environment classification: compiled on every host so its unit tests
 // run in CI on Windows as well as on Linux.
 #[cfg(target_os = "linux")]
+pub mod clipboard;
+#[cfg(target_os = "linux")]
 pub mod mpris;
+#[cfg(target_os = "linux")]
+pub mod screensaver;
 #[cfg(target_os = "linux")]
 pub mod services;
 pub mod session;

@@ -86,6 +86,15 @@ export PERCH_STATUS_FILE="$TMP/status.json"
 export PERCH_LOG=stderr
 STATUS() { jq -r "$1" "$PERCH_STATUS_FILE" 2>/dev/null || echo ""; }
 
+# Turn on the features the end-to-end checks below exercise.
+cat >"$TMP/config.toml" <<CFG
+[features]
+media = true
+todo = true
+clipboard = true
+shelf = true
+CFG
+
 T0=$(date +%s%N)
 "$BIN" --config "$TMP/config.toml" >"$TMP/perch.log" 2>&1 &
 PID=$!
@@ -140,13 +149,13 @@ sleep 0.8
 read -r X2 Y2 W2 H2 <<<"$(geom)"
 info "hovered: ${W2}x${H2}; state=$(STATUS .state)"
 check hover_expands "$([ "$H2" -gt "$H" ] && [ "$W2" -gt "$W" ] && echo 1 || echo 0)" "${W}x${H} -> ${W2}x${H2}"
-import -window root -crop 1920x260+0+0 "$OUT/x11-expanded-$COMP.png" 2>/dev/null || true
+import -window root -crop 560x220+680+0 "$OUT/x11-expanded-$COMP.png" 2>/dev/null || true
 
 xdotool mousemove 960 800
 sleep 1
 read -r _ _ W3 H3 <<<"$(geom)"
 check leave_collapses "$([ "$H3" -eq "$H" ] && echo 1 || echo 0)" "${W2}x${H2} -> ${W3}x${H3}"
-import -window root -crop 1920x120+0+0 "$OUT/x11-collapsed-$COMP.png" 2>/dev/null || true
+import -window root -crop 560x80+680+0 "$OUT/x11-collapsed-$COMP.png" 2>/dev/null || true
 
 # CLI verbs over the Unix socket.
 "$BIN" toggle-notch
@@ -175,11 +184,36 @@ if [ -n "$MOCK" ] && [ -x "$MOCK" ] && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; t
     check mpris_cli_resume "$([ "$(STATUS .playing)" = true ] && echo 1 || echo 0)" "playing=$(STATUS .playing)"
     xdotool mousemove 960 0
     sleep 0.8
-    import -window root -crop 1920x260+0+0 "$OUT/x11-media-$COMP.png" 2>/dev/null || true
+    import -window root -crop 560x220+680+0 "$OUT/x11-media-$COMP.png" 2>/dev/null || true
     xdotool mousemove 40 900
     sleep 0.8
 else
     info "MPRIS end-to-end skipped (set PERCH_MOCK_PLAYER and run under dbus-run-session)"
+fi
+
+# Clipboard board: normal copies are recorded, password-manager copies are
+# not (x-kde-passwordManagerHint, as set by KeePassXC).
+CLIP_OWNER=${PERCH_CLIP_OWNER:-}
+if [ -n "$CLIP_OWNER" ] && [ -x "$CLIP_OWNER" ]; then
+    printf 'hello from the smoke test' | xclip -selection clipboard
+    for _ in $(seq 50); do [ "$(STATUS .clipboard)" = 1 ] && break; sleep 0.1; done
+    check clipboard_records_copy "$([ "$(STATUS .clipboard)" = 1 ] && echo 1 || echo 0)" "entries=$(STATUS .clipboard)"
+    "$CLIP_OWNER" "hunter2" --secret &
+    CO=$!
+    PIDS+=("$CO")
+    sleep 1.5
+    check clipboard_skips_password_manager "$([ "$(STATUS .clipboard)" = 1 ] && echo 1 || echo 0)" "entries=$(STATUS .clipboard)"
+    printf 'second copy' | xclip -selection clipboard
+    for _ in $(seq 50); do [ "$(STATUS .clipboard)" = 2 ] && break; sleep 0.1; done
+    check clipboard_records_after_secret "$([ "$(STATUS .clipboard)" = 2 ] && echo 1 || echo 0)" "entries=$(STATUS .clipboard)"
+    "$BIN" tab clips
+    xdotool mousemove 960 0
+    sleep 0.8
+    import -window root -crop 560x220+680+0 "$OUT/x11-clipboard-$COMP.png" 2>/dev/null || true
+    xdotool mousemove 40 900
+    sleep 0.8
+else
+    info "clipboard end-to-end skipped (set PERCH_CLIP_OWNER)"
 fi
 
 # Fullscreen auto-hide (EWMH _NET_WM_STATE_FULLSCREEN via the WM). The

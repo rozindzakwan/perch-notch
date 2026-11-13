@@ -44,10 +44,18 @@ pub fn hotkey(_model: &mut Model, id: &str, _pressed: bool, _now: Now) -> Vec<Ef
     Vec::new()
 }
 
-/// Start dragging a shelf file out of the notch.
+/// Start dragging a shelf file out of the notch (Windows: OLE drag source).
+/// Elsewhere the file can be copied to the clipboard and pasted instead.
 pub fn drag_out(path: &Path) {
+    #[cfg(windows)]
+    {
+        if let Err(e) = perch_platform_windows::dragdrop::drag_files(&[path.to_path_buf()]) {
+            log::warn!("dragging {} out failed: {e}", path.display());
+        }
+    }
+    #[cfg(not(windows))]
     log::debug!(
-        "drag-out not available; {} stays on the shelf",
+        "drag-out is Windows-only; click the item to copy {} and paste it",
         path.display()
     );
 }

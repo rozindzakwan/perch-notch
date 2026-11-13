@@ -178,6 +178,14 @@ function Check([string]$Name, [bool]$Ok, [string]$Detail) {
 
 $cfg = Join-Path $env:TEMP 'perch-smoke-config.toml'
 Remove-Item $cfg -ErrorAction SilentlyContinue
+# Turn on the features the end-to-end checks exercise.
+@"
+[features]
+media = true
+todo = true
+clipboard = true
+shelf = true
+"@ | Set-Content -Path $cfg -Encoding ascii
 # Machine-readable state from the app, and an isolated data dir so the CLI
 # checks never touch the user's real to-dos.
 $statusFile = Join-Path $env:TEMP 'perch-smoke-status.json'
@@ -267,6 +275,26 @@ try {
     $st = Read-Status
     Check 'cli_todo' ($st.todos -eq 1) "todos=$($st.todos)"
     Check 'first_frame_fast' ($st.first_frame_ms -lt 300) "first frame $($st.first_frame_ms) ms after process start (target < 300)"
+
+    # --- clipboard board: record copies, never password-manager copies ------
+    function WaitStatus([scriptblock]$cond, [int]$ms = 5000) {
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        while ($sw.ElapsedMilliseconds -lt $ms) { if (& $cond) { return $true }; Start-Sleep -Milliseconds 100 }
+        return $false
+    }
+    Set-Clipboard -Value 'hello from the smoke test'
+    $ok = WaitStatus { (Read-Status).clipboard -eq 1 }
+    Check 'clipboard_records_copy' $ok "entries=$((Read-Status).clipboard)"
+    $do = New-Object System.Windows.Forms.DataObject
+    $do.SetData([System.Windows.Forms.DataFormats]::UnicodeText, 'hunter2')
+    # What KeePass, 1Password and friends add so history tools stay away.
+    $do.SetData('ExcludeClipboardContentFromMonitorProcessing', $true)
+    [System.Windows.Forms.Clipboard]::SetDataObject($do, $true)
+    Start-Sleep -Milliseconds 1500
+    Check 'clipboard_skips_password_manager' ((Read-Status).clipboard -eq 1) "entries=$((Read-Status).clipboard)"
+    Set-Clipboard -Value 'second copy'
+    $ok = WaitStatus { (Read-Status).clipboard -eq 2 }
+    Check 'clipboard_records_after_secret' $ok "entries=$((Read-Status).clipboard)"
 
     # --- fullscreen auto-hide ------------------------------------------------
     # A borderless window covering the monitor, brought to the foreground, is

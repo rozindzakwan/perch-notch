@@ -10,6 +10,10 @@
 #[cfg(windows)]
 mod autostart;
 #[cfg(windows)]
+pub mod clipboard;
+#[cfg(windows)]
+pub mod dragdrop;
+#[cfg(windows)]
 pub mod events;
 #[cfg(windows)]
 mod fullscreen;
@@ -26,6 +30,8 @@ pub mod window;
 
 #[cfg(windows)]
 pub use autostart::RegistryAutostart;
+#[cfg(windows)]
+pub use clipboard::WindowsClipboard;
 #[cfg(windows)]
 pub use events::{EventFlags, WindowsEvents};
 #[cfg(windows)]

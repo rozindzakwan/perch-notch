@@ -164,6 +164,9 @@ pub fn monitor_work_area(m: (i32, i32, u32, u32), wa: (i32, i32, u32, u32)) -> O
 pub struct WatchFlags {
     /// Emit `ClipboardChanged` (XFixes selection notifications on CLIPBOARD).
     pub clipboard: AtomicBool,
+    /// Privacy flags of the current CLIPBOARD content, from its `TARGETS`
+    /// (filled in before `ClipboardChanged` is emitted).
+    pub clipboard_flags: std::sync::Mutex<perch_core::clipboard::ContentFlags>,
     /// Emit `ActiveWindowChanged` (screen time).
     pub active_window: AtomicBool,
 }
@@ -193,6 +196,9 @@ struct WatchState {
     workarea: Atom,
     wm_check: Atom,
     clipboard: Atom,
+    targets: Atom,
+    targets_prop: Atom,
+    password_hint: Atom,
     type_desktop: Atom,
     active: Option<Window>,
     last_fullscreen: Option<bool>,
@@ -259,6 +265,9 @@ impl X11Watcher {
             workarea: intern(&conn, "_NET_WORKAREA")?,
             wm_check: intern(&conn, "_NET_SUPPORTING_WM_CHECK")?,
             clipboard: intern(&conn, "CLIPBOARD")?,
+            targets: intern(&conn, "TARGETS")?,
+            targets_prop: intern(&conn, "PERCH_CLIPBOARD_TARGETS")?,
+            password_hint: intern(&conn, "x-kde-passwordManagerHint")?,
             type_desktop: intern(&conn, "_NET_WM_WINDOW_TYPE_DESKTOP")?,
             active: None,
             last_fullscreen: None,
@@ -376,8 +385,21 @@ fn watch_loop(
             Event::RandrScreenChangeNotify(_) => sink(PlatformEvent::MonitorsChanged),
             Event::XfixesSelectionNotify(n) if n.selection == st.clipboard => {
                 if flags.clipboard.load(Ordering::Relaxed) {
-                    sink(PlatformEvent::ClipboardChanged);
+                    // Ask the new owner for its TARGETS first; the answer
+                    // (SelectionNotify below) decides whether this content may
+                    // be looked at at all.
+                    let _ = conn.convert_selection(
+                        wake,
+                        st.clipboard,
+                        st.targets,
+                        st.targets_prop,
+                        n.selection_timestamp,
+                    );
+                    let _ = conn.flush();
                 }
+            }
+            Event::SelectionNotify(n) if n.requestor == wake && n.selection == st.clipboard => {
+                on_targets(&conn, &st, wake, n.property, &sink, &flags);
             }
             Event::Error(e) => log::trace!("X11 error (ignored): {e:?}"),
             _ => {}
@@ -564,4 +586,42 @@ pub fn make_background_parent_relative(win: u32) -> Result<()> {
     conn.flush()
         .map_err(|e| Error::backend(format!("flush: {e}")))?;
     Ok(())
+}
+
+/// The CLIPBOARD owner answered our TARGETS request. Record the privacy flags
+/// and only then announce the change, so password-manager content is never
+/// even signalled, let alone read.
+fn on_targets(
+    conn: &RustConnection,
+    st: &WatchState,
+    wake: Window,
+    property: Atom,
+    sink: &EventSink,
+    flags: &WatchFlags,
+) {
+    let targets: Vec<Atom> = if property == x11rb::NONE {
+        Vec::new() // the owner refused TARGETS; nothing to inspect
+    } else {
+        conn.get_property(true, wake, property, AtomEnum::ATOM, 0, 1024)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .and_then(|r| r.value32().map(|v| v.collect()))
+            .unwrap_or_default()
+    };
+    let secret = targets.contains(&st.password_hint);
+    // Presence of the KDE password-manager hint is treated as secret
+    // (KeePassXC and friends set it to "secret"); erring on the side of not
+    // recording costs nothing.
+    let f = perch_core::clipboard::ContentFlags {
+        password_manager_hint: secret,
+        ..Default::default()
+    };
+    if let Ok(mut slot) = flags.clipboard_flags.lock() {
+        *slot = f;
+    }
+    if secret {
+        log::debug!("clipboard content marked secret by its owner; not recorded");
+    } else {
+        sink(PlatformEvent::ClipboardChanged);
+    }
 }
