@@ -281,10 +281,15 @@ pub fn dictate_toggle(model: &mut Model) {
     model.flash("Dictation is not in this build", Now::real());
 }
 
-/// A global hotkey fired.
-pub fn hotkey(_model: &mut Model, id: &str, _pressed: bool, _now: Now) -> Vec<Effect> {
-    log::debug!("hotkey {id} has no handler in this build");
-    Vec::new()
+/// A global hotkey fired. Presses run the bound command; releasing the
+/// dictation key ends push-to-talk (X11 reports releases; Windows only
+/// presses, where dictation toggles instead).
+pub fn hotkey(model: &mut Model, id: &str, pressed: bool, now: Now) -> Vec<Effect> {
+    match (id, pressed) {
+        (_, true) => model.command(id, now),
+        ("dictate", false) => model.command("dictate-release", now),
+        _ => Vec::new(),
+    }
 }
 
 /// Start dragging a shelf file out of the notch (Windows: OLE drag source).

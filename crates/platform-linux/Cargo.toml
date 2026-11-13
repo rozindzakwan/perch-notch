@@ -25,6 +25,7 @@ x11rb = { workspace = true, features = [
     "screensaver",
     "xtest",
     "shape",
+    "xkb",
 ] }
 
 [dev-dependencies]

@@ -10,6 +10,8 @@
 #[cfg(windows)]
 mod autostart;
 #[cfg(windows)]
+pub mod capture;
+#[cfg(windows)]
 pub mod clipboard;
 #[cfg(windows)]
 pub mod dragdrop;

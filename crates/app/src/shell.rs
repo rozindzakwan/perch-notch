@@ -346,6 +346,9 @@ impl Shell {
         let fx = self.model.apply_config(cfg.clone());
         self.services.apply_features(self.model.features());
         self.load_usage_once();
+        if old.hotkeys != cfg.hotkeys || old.features != cfg.features {
+            self.sync_hotkeys();
+        }
         if old.notch.animation_ms != cfg.notch.animation_ms
             || old.notch.collapse_delay_ms != cfg.notch.collapse_delay_ms
         {
@@ -376,6 +379,24 @@ impl Shell {
         if let Some(agg) = crate::extras::load_usage() {
             self.model.restore_usage(&agg);
         }
+    }
+
+    /// Register the configured hotkeys for live features only, so Perch never
+    /// grabs a key it would not use.
+    fn sync_hotkeys(&mut self) {
+        let (bindings, problems) = self.config().hotkeys.bindings();
+        for p in problems {
+            log::warn!("{p}");
+        }
+        let live: Vec<_> = bindings
+            .into_iter()
+            .filter(|b| match b.id.as_str() {
+                "shot" => self.model.is_active(Feature::Screenshot),
+                "dictate" => self.model.is_active(Feature::SpeechToText),
+                _ => true,
+            })
+            .collect();
+        self.services.set_hotkeys(live);
     }
 
     fn sync_autostart(&mut self) {
@@ -797,6 +818,7 @@ impl ApplicationHandler<UserEvent> for Shell {
         }
         self.services.apply_features(self.model.features());
         self.load_usage_once();
+        self.sync_hotkeys();
         self.services.start_tray(self.config().autostart);
         self.services.watch_config(self.store.path());
         self.sync_autostart();

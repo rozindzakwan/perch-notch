@@ -106,6 +106,15 @@ impl Services {
         self.os.set_tray_autostart(on);
     }
 
+    /// Register global hotkeys (replaces any previous set).
+    pub fn set_hotkeys(&self, bindings: Vec<perch_core::hotkey::Binding>) {
+        let flags = self.os.flags();
+        if let Ok(mut h) = flags.hotkeys.lock() {
+            *h = bindings;
+        }
+        self.os.refresh();
+    }
+
     /// X11: keep the notch windows' WM-owned states asserted.
     pub fn track_notch_windows(&self, ids: &[u32]) {
         self.os.track_notch_windows(ids);

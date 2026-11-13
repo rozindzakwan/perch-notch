@@ -253,6 +253,54 @@ impl RemindersConfig {
     }
 }
 
+/// Global shortcuts. Empty string = not bound. Parsed with
+/// [`crate::hotkey::Accel::parse`]; an invalid one is reported and skipped.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HotkeysConfig {
+    /// Open/close the notch.
+    pub toggle_notch: String,
+    /// Start a screenshot (when the feature is on).
+    pub screenshot: String,
+    /// Start/stop dictation (when the feature is on).
+    pub dictate: String,
+}
+
+impl Default for HotkeysConfig {
+    fn default() -> Self {
+        Self {
+            toggle_notch: "Ctrl+Alt+N".into(),
+            screenshot: "Ctrl+Alt+S".into(),
+            dictate: "Ctrl+Alt+D".into(),
+        }
+    }
+}
+
+impl HotkeysConfig {
+    /// The valid bindings, plus a message for each invalid one.
+    pub fn bindings(&self) -> (Vec<crate::hotkey::Binding>, Vec<String>) {
+        let mut ok = Vec::new();
+        let mut bad = Vec::new();
+        for (id, s) in [
+            ("toggle-notch", &self.toggle_notch),
+            ("shot", &self.screenshot),
+            ("dictate", &self.dictate),
+        ] {
+            if s.trim().is_empty() {
+                continue;
+            }
+            match crate::hotkey::Accel::parse(s) {
+                Ok(accel) => ok.push(crate::hotkey::Binding {
+                    id: id.to_string(),
+                    accel,
+                }),
+                Err(e) => bad.push(format!("hotkeys.{id}: \"{s}\": {e}")),
+            }
+        }
+        (ok, bad)
+    }
+}
+
 /// The whole persisted configuration.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -271,6 +319,8 @@ pub struct Config {
     pub theme: Theme,
     /// Start Perch at login.
     pub autostart: bool,
+    /// Global shortcuts.
+    pub hotkeys: HotkeysConfig,
 }
 
 impl Config {

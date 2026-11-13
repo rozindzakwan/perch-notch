@@ -45,7 +45,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     IsZoomed, KillTimer, PeekMessageW, PostThreadMessageW, RegisterClassW, SetTimer,
     TranslateMessage, EVENT_OBJECT_LOCATIONCHANGE, EVENT_SYSTEM_FOREGROUND, HMENU, MSG,
     OBJID_WINDOW, PM_NOREMOVE, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP,
-    WM_CLIPBOARDUPDATE, WM_DISPLAYCHANGE, WM_QUIT, WM_SETTINGCHANGE, WM_TIMER,
+    WM_CLIPBOARDUPDATE, WM_DISPLAYCHANGE, WM_HOTKEY, WM_QUIT, WM_SETTINGCHANGE, WM_TIMER,
     WM_WTSSESSION_CHANGE, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 
@@ -69,6 +69,8 @@ pub struct EventFlags {
     pub clipboard: AtomicBool,
     /// Emit `ActiveWindowChanged` (screen time).
     pub active_window: AtomicBool,
+    /// Global hotkeys to register (re-read on refresh).
+    pub hotkeys: std::sync::Mutex<Vec<perch_core::hotkey::Binding>>,
 }
 
 struct State {
@@ -81,6 +83,8 @@ struct State {
     location_hook: Option<HWINEVENTHOOK>,
     location_pid: u32,
     clipboard_listening: bool,
+    /// Registered hotkey ids (index + 1 = RegisterHotKey id).
+    hotkey_ids: Vec<String>,
 }
 
 thread_local! {
@@ -192,6 +196,7 @@ fn run(
             location_hook: None,
             location_pid: 0,
             clipboard_listening: false,
+            hotkey_ids: Vec::new(),
         });
     });
     refresh_flags();
@@ -290,6 +295,7 @@ fn emit(ev: PlatformEvent) {
 }
 
 fn refresh_flags() {
+    refresh_hotkeys();
     with_state(|st| {
         let want = st.flags.clipboard.load(Ordering::Relaxed);
         if want != st.clipboard_listening {
@@ -340,6 +346,16 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_CLIPBOARDUPDATE => {
             emit(PlatformEvent::ClipboardChanged);
+            LRESULT(0)
+        }
+        WM_HOTKEY => {
+            let id =
+                with_state(|st| st.hotkey_ids.get(wparam.0.wrapping_sub(1)).cloned()).flatten();
+            if let Some(id) = id {
+                // RegisterHotKey reports presses only; holding is handled as
+                // press-to-toggle by the app.
+                emit(PlatformEvent::Hotkey { id, pressed: true });
+            }
             LRESULT(0)
         }
         WM_TIMER if wparam.0 == RECHECK_TIMER => {
@@ -606,4 +622,66 @@ fn process_name(pid: u32) -> Option<String> {
 /// A friendly name for a process: its executable stem (e.g. `Spotify`).
 pub fn process_display_name(pid: u32) -> Option<String> {
     process_name(pid)
+}
+
+/// Virtual-key code for a hotkey key. Pure.
+pub fn virtual_key(key: perch_core::hotkey::Key) -> u32 {
+    use perch_core::hotkey::Key;
+    match key {
+        Key::Letter(c) => c.to_ascii_uppercase() as u32,
+        Key::Digit(d) => u32::from(b'0' + d.min(9)),
+        Key::F(n) => 0x70 + u32::from(n.clamp(1, 24)) - 1,
+        Key::Space => 0x20,
+        Key::PrintScreen => 0x2C,
+        Key::Pause => 0x13,
+    }
+}
+
+/// (Re-)register the configured global hotkeys on our window.
+fn refresh_hotkeys() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT,
+        MOD_SHIFT, MOD_WIN,
+    };
+    with_state(|st| {
+        let wanted: Vec<perch_core::hotkey::Binding> = st
+            .flags
+            .hotkeys
+            .lock()
+            .map(|h| h.clone())
+            .unwrap_or_default();
+        for i in 0..st.hotkey_ids.len() {
+            // SAFETY: unregistering ids we registered on our own window.
+            let _ = unsafe { UnregisterHotKey(st.hwnd, i as i32 + 1) };
+        }
+        st.hotkey_ids.clear();
+        for b in wanted {
+            let mut mods = MOD_NOREPEAT;
+            if b.accel.ctrl {
+                mods |= MOD_CONTROL;
+            }
+            if b.accel.alt {
+                mods |= MOD_ALT;
+            }
+            if b.accel.shift {
+                mods |= MOD_SHIFT;
+            }
+            if b.accel.super_key {
+                mods |= MOD_WIN;
+            }
+            let id = st.hotkey_ids.len() as i32 + 1;
+            // SAFETY: registering a hotkey on our own window and thread.
+            match unsafe { RegisterHotKey(st.hwnd, id, HOT_KEY_MODIFIERS(mods.0), virtual_key(b.accel.key)) } {
+                Ok(()) => log::info!("hotkey {} -> {}", b.accel, b.id),
+                Err(_) => log::warn!(
+                    "hotkey {} for {} is already used by another application; bind `perch {}` in your desktop instead",
+                    b.accel,
+                    b.id,
+                    b.id
+                ),
+            }
+            // Keep the slot even on failure so ids stay aligned.
+            st.hotkey_ids.push(b.id);
+        }
+    });
 }

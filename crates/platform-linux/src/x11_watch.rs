@@ -167,6 +167,8 @@ pub struct WatchFlags {
     /// Privacy flags of the current CLIPBOARD content, from its `TARGETS`
     /// (filled in before `ClipboardChanged` is emitted).
     pub clipboard_flags: std::sync::Mutex<perch_core::clipboard::ContentFlags>,
+    /// Global hotkeys to grab on the root window (re-read on refresh).
+    pub hotkeys: std::sync::Mutex<Vec<perch_core::hotkey::Binding>>,
     /// Emit `ActiveWindowChanged` (screen time).
     pub active_window: AtomicBool,
 }
@@ -204,6 +206,8 @@ struct WatchState {
     last_fullscreen: Option<bool>,
     last_app: String,
     clipboard_on: bool,
+    /// Grabbed (keycode, modifier mask, id).
+    grabs: Vec<(u8, u16, String)>,
 }
 
 impl X11Watcher {
@@ -273,6 +277,7 @@ impl X11Watcher {
             last_fullscreen: None,
             last_app: String::new(),
             clipboard_on: false,
+            grabs: Vec::new(),
         };
         conn.flush()
             .map_err(|e| Error::backend(format!("flush: {e}")))?;
@@ -355,6 +360,7 @@ fn watch_loop(
                 }
                 apply_clipboard_flag(&conn, &mut st, flags.clipboard.load(Ordering::Relaxed));
                 sync_tracked(&conn, &mut st);
+                apply_hotkeys(&conn, &mut st, &flags);
                 if flags.active_window.load(Ordering::Relaxed) {
                     st.last_app.clear();
                     on_active_changed(&conn, &mut st, &sink, &flags);
@@ -383,6 +389,20 @@ fn watch_loop(
                 check_fullscreen(&conn, &mut st, &sink);
             }
             Event::RandrScreenChangeNotify(_) => sink(PlatformEvent::MonitorsChanged),
+            Event::KeyPress(k) | Event::KeyRelease(k) if k.event == st.root => {
+                let pressed = k.response_type & 0x7f == x11rb::protocol::xproto::KEY_PRESS_EVENT;
+                let mods = u16::from(k.state) & !(LOCK_MASK | NUM_LOCK_MASK);
+                if let Some((_, _, id)) = st
+                    .grabs
+                    .iter()
+                    .find(|(c, m, _)| *c == k.detail && *m == mods)
+                {
+                    sink(PlatformEvent::Hotkey {
+                        id: id.clone(),
+                        pressed,
+                    });
+                }
+            }
             Event::XfixesSelectionNotify(n) if n.selection == st.clipboard => {
                 if flags.clipboard.load(Ordering::Relaxed) {
                     // Ask the new owner for its TARGETS first; the answer
@@ -629,4 +649,128 @@ fn on_targets(
     } else {
         sink(PlatformEvent::ClipboardChanged);
     }
+}
+
+const LOCK_MASK: u16 = 1 << 1; // CapsLock
+const NUM_LOCK_MASK: u16 = 1 << 4; // Mod2 = NumLock on practically every layout
+
+/// X keysym for a hotkey key. Pure.
+pub fn keysym(key: perch_core::hotkey::Key) -> u32 {
+    use perch_core::hotkey::Key;
+    match key {
+        Key::Letter(c) => c.to_ascii_lowercase() as u32,
+        Key::Digit(d) => u32::from(b'0' + d.min(9)),
+        Key::F(n) => 0xffbe + u32::from(n.clamp(1, 24)) - 1,
+        Key::Space => 0x20,
+        Key::PrintScreen => 0xff61,
+        Key::Pause => 0xff13,
+    }
+}
+
+/// X modifier mask for an accelerator (Ctrl, Mod1 = Alt, Shift, Mod4 = Super).
+pub fn modifier_mask(a: &perch_core::hotkey::Accel) -> u16 {
+    let mut m = 0u16;
+    if a.shift {
+        m |= 1;
+    }
+    if a.ctrl {
+        m |= 1 << 2;
+    }
+    if a.alt {
+        m |= 1 << 3;
+    }
+    if a.super_key {
+        m |= 1 << 6;
+    }
+    m
+}
+
+fn keycode_for(conn: &RustConnection, sym: u32) -> Option<u8> {
+    let setup = conn.setup();
+    let (min, max) = (setup.min_keycode, setup.max_keycode);
+    let map = conn
+        .get_keyboard_mapping(min, max - min + 1)
+        .ok()?
+        .reply()
+        .ok()?;
+    let per = usize::from(map.keysyms_per_keycode.max(1));
+    map.keysyms
+        .chunks(per)
+        .position(|syms| syms.contains(&sym))
+        .map(|i| min + i as u8)
+}
+
+/// Grab the configured hotkeys on the root window, for every combination of
+/// the CapsLock / NumLock "noise" modifiers so they work regardless of lock
+/// state. A grab another client already holds (Cinnamon's own keybindings)
+/// fails with BadAccess; that is reported so the user can pick another
+/// shortcut or bind `perch <verb>` in Cinnamon's Keyboard settings.
+fn apply_hotkeys(conn: &RustConnection, st: &mut WatchState, flags: &WatchFlags) {
+    use x11rb::protocol::xproto::{GrabMode, ModMask};
+    for (code, mods, _) in st.grabs.drain(..) {
+        for extra in [0, LOCK_MASK, NUM_LOCK_MASK, LOCK_MASK | NUM_LOCK_MASK] {
+            let _ = conn.ungrab_key(code, st.root, ModMask::from(mods | extra));
+        }
+    }
+    let wanted: Vec<perch_core::hotkey::Binding> =
+        flags.hotkeys.lock().map(|h| h.clone()).unwrap_or_default();
+    if !wanted.is_empty() {
+        enable_detectable_autorepeat(conn);
+    }
+    for b in wanted {
+        let Some(code) = keycode_for(conn, keysym(b.accel.key)) else {
+            log::warn!("hotkey {}: no key on this keyboard layout", b.accel);
+            continue;
+        };
+        let mods = modifier_mask(&b.accel);
+        let mut conflict = false;
+        for extra in [0, LOCK_MASK, NUM_LOCK_MASK, LOCK_MASK | NUM_LOCK_MASK] {
+            let r = conn
+                .grab_key(
+                    true,
+                    st.root,
+                    ModMask::from(mods | extra),
+                    code,
+                    GrabMode::ASYNC,
+                    GrabMode::ASYNC,
+                )
+                .map(|c| c.check());
+            if !matches!(r, Ok(Ok(()))) {
+                conflict = true;
+            }
+        }
+        if conflict {
+            log::warn!(
+                "hotkey {} for {} conflicts with an existing keybinding (e.g. Cinnamon's); \
+                 choose another, or bind `perch {}` in Keyboard settings",
+                b.accel,
+                b.id,
+                b.id
+            );
+        } else {
+            log::info!("hotkey {} -> {}", b.accel, b.id);
+        }
+        st.grabs.push((code, mods, b.id));
+    }
+    let _ = conn.flush();
+}
+
+/// Ask XKB not to synthesise release/press pairs while a key auto-repeats, so
+/// holding a push-to-talk key yields one press and one release.
+fn enable_detectable_autorepeat(conn: &RustConnection) {
+    use x11rb::protocol::xkb::{self, ConnectionExt as XkbExt};
+    if conn.xkb_use_extension(1, 0).map(|c| c.reply()).is_err() {
+        return;
+    }
+    let mask = xkb::PerClientFlag::DETECTABLE_AUTO_REPEAT;
+    let _ = conn
+        .xkb_per_client_flags(
+            xkb::ID::USE_CORE_KBD.into(),
+            mask,
+            mask,
+            xkb::BoolCtrl::from(0u32),
+            xkb::BoolCtrl::from(0u32),
+            xkb::BoolCtrl::from(0u32),
+        )
+        .map(|c| c.reply());
 }

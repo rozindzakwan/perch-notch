@@ -10,6 +10,7 @@ pub mod clipboard;
 pub mod config;
 pub mod error;
 pub mod geometry;
+pub mod hotkey;
 pub mod lrc;
 pub mod media;
 pub mod noise;
