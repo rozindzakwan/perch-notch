@@ -97,6 +97,8 @@ pub struct Status {
     pub noise: bool,
     /// Lyrics line currently shown.
     pub lyric: String,
+    /// Apps with recorded screen time today.
+    pub usage_apps: usize,
 }
 
 /// Write the status file if `$PERCH_STATUS_FILE` is set and it changed.

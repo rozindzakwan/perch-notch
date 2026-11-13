@@ -450,13 +450,18 @@ fn on_active_changed(
     }
     check_fullscreen(conn, st, sink);
     if flags.active_window.load(Ordering::Relaxed) {
-        if let Some(w) = st.active {
-            let app = window_app(conn, w, &st.atoms).unwrap_or_default();
-            if !app.is_empty() && app != st.last_app {
-                st.last_app = app.clone();
-                let title = window_title(conn, w, st.wm_name, st.utf8).unwrap_or_default();
-                sink(PlatformEvent::ActiveWindowChanged { app, title });
-            }
+        // No active window means the desktop has focus; report that too, or
+        // the last app would keep accruing time it is not getting.
+        let (app, title) = match st.active {
+            Some(w) => (
+                window_app(conn, w, &st.atoms).unwrap_or_default(),
+                window_title(conn, w, st.wm_name, st.utf8).unwrap_or_default(),
+            ),
+            None => ("desktop".to_string(), String::new()),
+        };
+        if !app.is_empty() && app != st.last_app {
+            st.last_app = app.clone();
+            sink(PlatformEvent::ActiveWindowChanged { app, title });
         }
     }
 }

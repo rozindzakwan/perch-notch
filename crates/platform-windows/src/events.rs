@@ -602,3 +602,8 @@ fn process_name(pid: u32) -> Option<String> {
         .map(|s| s.to_string_lossy().into_owned())?;
     Some(stem)
 }
+
+/// A friendly name for a process: its executable stem (e.g. `Spotify`).
+pub fn process_display_name(pid: u32) -> Option<String> {
+    process_name(pid)
+}

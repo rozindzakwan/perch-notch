@@ -19,6 +19,8 @@ pub mod clipboard;
 #[cfg(target_os = "linux")]
 pub mod mpris;
 #[cfg(target_os = "linux")]
+pub mod pulse;
+#[cfg(target_os = "linux")]
 pub mod screensaver;
 #[cfg(target_os = "linux")]
 pub mod services;

@@ -25,10 +25,24 @@ pub fn media(sink: EventSink) -> Result<Box<dyn MediaControl>> {
     }
 }
 
-/// Per-app volume.
-pub fn mixer(_sink: EventSink) -> Result<Box<dyn AudioMixer>> {
-    Err(Error::unavailable(
-        "mixer",
-        "not implemented in this build yet",
-    ))
+/// Per-app volume: WASAPI audio sessions on Windows, PulseAudio sink inputs
+/// (also served by pipewire-pulse) on Linux.
+pub fn mixer(sink: EventSink) -> Result<Box<dyn AudioMixer>> {
+    #[cfg(windows)]
+    {
+        Ok(Box::new(perch_platform_windows::mixer::WasapiMixer::start(
+            sink,
+        )?))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Ok(Box::new(perch_platform_linux::pulse::PulseMixer::start(
+            sink,
+        )?))
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = sink;
+        Err(Error::unavailable("mixer", "no backend for this OS"))
+    }
 }

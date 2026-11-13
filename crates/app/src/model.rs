@@ -251,9 +251,21 @@ impl Model {
         &self.usage
     }
 
-    /// Replace the screen-time tracker (restored from SQLite at startup).
+    /// Replace the screen-time tracker.
     pub fn set_usage(&mut self, usage: UsageTracker) {
         self.usage = usage;
+    }
+
+    /// Merge totals persisted by a previous run.
+    pub fn restore_usage(&mut self, persisted: &perch_core::usage::UsageAggregate) {
+        self.usage.restore(persisted);
+    }
+
+    /// Credit the in-flight slice to the current app (before saving on exit).
+    pub fn flush_usage(&mut self, now: Now) {
+        if self.is_active(Feature::ScreenTime) {
+            self.usage.flush(now.unix);
+        }
     }
 
     /// The Pomodoro.

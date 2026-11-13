@@ -81,6 +81,8 @@ pub struct Shell {
     quitting: bool,
     /// Effects produced where no `ActiveEventLoop` was at hand.
     queued: Vec<Effect>,
+    /// Persisted screen time has been merged into the model.
+    usage_loaded: bool,
 }
 
 impl Shell {
@@ -131,6 +133,7 @@ impl Shell {
             data_dir,
             quitting: false,
             queued: Vec::new(),
+            usage_loaded: false,
         }
     }
 
@@ -312,8 +315,15 @@ impl Shell {
                 .collect(),
             frames: self.frames,
             first_frame_ms: self.first_frame_ms,
-            noise: self.model.noise().is_audible(),
+            noise: crate::extras::noise_stream_open(),
             lyric,
+            usage_apps: {
+                let now = Now::real();
+                self.model.flush_usage(now);
+                let day =
+                    perch_core::usage::DayId::from_unix(now.unix, crate::model::local_offset());
+                self.model.usage().aggregate().apps_for(day).len()
+            },
         };
         // Frames change constantly during animation; only write when
         // something other than the frame counter changed, or every 30 frames.
@@ -335,6 +345,7 @@ impl Shell {
         let old = self.model.config().clone();
         let fx = self.model.apply_config(cfg.clone());
         self.services.apply_features(self.model.features());
+        self.load_usage_once();
         if old.notch.animation_ms != cfg.notch.animation_ms
             || old.notch.collapse_delay_ms != cfg.notch.collapse_delay_ms
         {
@@ -354,6 +365,17 @@ impl Shell {
         self.place();
         self.refresh_settings_form();
         self.pending(fx);
+    }
+
+    /// Merge persisted screen time the first time the feature is live.
+    fn load_usage_once(&mut self) {
+        if self.usage_loaded || !self.model.is_active(Feature::ScreenTime) {
+            return;
+        }
+        self.usage_loaded = true;
+        if let Some(agg) = crate::extras::load_usage() {
+            self.model.restore_usage(&agg);
+        }
     }
 
     fn sync_autostart(&mut self) {
@@ -481,6 +503,8 @@ impl Shell {
                 Effect::ReloadConfig => self.reload_config(),
                 Effect::Quit => {
                     self.quitting = true;
+                    self.model.flush_usage(Now::real());
+                    self.model.flush_usage(Now::real());
                     crate::extras::shutdown(self.model.usage());
                     el.exit();
                 }
@@ -772,6 +796,7 @@ impl ApplicationHandler<UserEvent> for Shell {
             self.services.track_notch_windows(&[pill, hot]);
         }
         self.services.apply_features(self.model.features());
+        self.load_usage_once();
         self.services.start_tray(self.config().autostart);
         self.services.watch_config(self.store.path());
         self.sync_autostart();
@@ -833,6 +858,7 @@ impl ApplicationHandler<UserEvent> for Shell {
         match event {
             WindowEvent::CloseRequested => {
                 self.quitting = true;
+                self.model.flush_usage(Now::real());
                 crate::extras::shutdown(self.model.usage());
                 el.exit();
             }

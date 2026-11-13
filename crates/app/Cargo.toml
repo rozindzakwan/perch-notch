@@ -30,9 +30,10 @@ serde_json.workspace = true
 directories.workspace = true
 ureq = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
+rodio = { workspace = true, optional = true }
 
 [features]
-default = ["media", "lyrics", "productivity", "clipboard"]
+default = ["media", "lyrics", "productivity", "clipboard", "white-noise", "screen-time"]
 # Optional features are compile-time gated as well as config-gated, so a build
 # without them does not contain their code at all.
 media = []
@@ -40,7 +41,7 @@ lyrics = ["ureq"]
 productivity = []
 screen-time = ["rusqlite"]
 clipboard = []
-white-noise = []
+white-noise = ["rodio"]
 speech = []
 screenshot = []
 camera = []

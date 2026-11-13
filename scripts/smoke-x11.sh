@@ -93,6 +93,7 @@ media = true
 todo = true
 clipboard = true
 shelf = true
+screen_time = true
 CFG
 
 T0=$(date +%s%N)
@@ -229,6 +230,8 @@ wmctrl -r "Perch settings" -b remove,fullscreen
 sleep 1
 check unfullscreen_shows "$([ "$(STATUS .visible)" = true ] && echo 1 || echo 0)" "visible=$(STATUS .visible)"
 wmctrl -c "Perch settings" || true
+sleep 0.5
+check screen_time_records "$([ "$(STATUS .usage_apps)" -ge 1 ] 2>/dev/null && echo 1 || echo 0)" "apps today=$(STATUS .usage_apps)"
 
 # A window-manager restart ("Restart Cinnamon") must not lose keep-above.
 if [ "$REAL" = 0 ]; then

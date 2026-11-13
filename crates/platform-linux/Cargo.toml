@@ -14,6 +14,7 @@ log.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 zbus = { workspace = true }
 arboard.workspace = true
+libpulse-binding = { version = "2.30", default-features = false }
 image = { workspace = true }
 ksni = { workspace = true }
 x11rb = { workspace = true, features = [

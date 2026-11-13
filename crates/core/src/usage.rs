@@ -191,6 +191,11 @@ impl UsageTracker {
         self.since = at;
     }
 
+    /// Merge previously persisted totals (from SQLite) into this tracker.
+    pub fn restore(&mut self, persisted: &UsageAggregate) {
+        self.aggregate.merge(persisted);
+    }
+
     /// The aggregate accumulated so far. The in-flight slice is settled by
     /// [`UsageTracker::flush`] or the next window change.
     pub fn aggregate(&self) -> &UsageAggregate {

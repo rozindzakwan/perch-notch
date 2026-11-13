@@ -185,6 +185,7 @@ media = true
 todo = true
 clipboard = true
 shelf = true
+screen_time = true
 "@ | Set-Content -Path $cfg -Encoding ascii
 # Machine-readable state from the app, and an isolated data dir so the CLI
 # checks never touch the user's real to-dos.
@@ -321,6 +322,9 @@ try {
     for ($i = 0; $i -lt 25; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
     $st = Read-Status
     Check 'unfullscreen_shows' ($st.visible -eq $true) "visible=$($st.visible)"
+    # The foreground changes above (to the test window and back) are what
+    # screen time records.
+    Check 'screen_time_records' ($st.usage_apps -ge 1) "apps today=$($st.usage_apps)"
 
     # --- focus must never move ----------------------------------------------
     $fgAfter = [PerchNative]::GetForegroundWindow()

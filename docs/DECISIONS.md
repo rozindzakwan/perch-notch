@@ -183,3 +183,21 @@ Windows uses an OLE drag source over the shell's own data object for the files
 Explorer drags works. Linux has no drag-out (an XDND source is a lot of
 protocol for little gain); clicking a shelf item copies it as a file to the
 clipboard (`text/uri-list` via `arboard`), which file managers paste.
+
+## ADR-014: Audio
+
+- **Mixer.** Windows: WASAPI sessions on the default render endpoint, grouped
+  per application, with `IAudioSessionNotification` + per-session
+  `IAudioSessionEvents` callbacks (own changes are tagged with a context GUID so
+  their echoes are ignored). Linux: PulseAudio sink inputs over
+  `libpulse-binding`'s threaded mainloop with a sink-input subscription; works
+  on PipeWire through `pipewire-pulse` (Mint 22's default). Limitation: the
+  Windows mixer follows the default device it started on; switching the
+  default output device needs the feature toggled (documented).
+- **White noise.** Procedural (core `NoiseGenerator`), played through `rodio`
+  only while the mix is audible: the output stream is dropped the moment the
+  last layer goes silent, so an idle Perch has no audio callback running.
+- **Screen time.** Per-day, per-app totals in `usage.sqlite` (WAL), upserted
+  as absolute values on every app switch and on exit, last 30 days restored at
+  start. On X11 the desktop gaining focus is reported as "desktop", so the last
+  app stops accruing time.

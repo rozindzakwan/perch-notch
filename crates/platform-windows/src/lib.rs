@@ -20,6 +20,8 @@ mod fullscreen;
 #[cfg(windows)]
 pub mod media;
 #[cfg(windows)]
+pub mod mixer;
+#[cfg(windows)]
 mod monitors;
 #[cfg(windows)]
 pub mod services;
