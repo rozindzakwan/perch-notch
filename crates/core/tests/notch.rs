@@ -63,6 +63,44 @@ fn leaving_the_pill_collapses_after_the_delay() {
 }
 
 #[test]
+fn leaving_the_hot_zone_without_reaching_the_pill_collapses_it() {
+    // Regression (found by scripts/smoke-windows.ps1): hovering the 2px strip
+    // expands the pill, but if the cursor then leaves the strip sideways it
+    // never enters the pill, so the hot-zone leave is the ONLY signal we get.
+    // Ignoring it left the notch stuck open forever.
+    let mut n = notch();
+    n.handle(NotchEvent::HotZoneEntered);
+    n.advance(Duration::from_millis(200));
+    assert_eq!(n.state(), NotchState::Expanded);
+
+    n.handle(NotchEvent::HotZoneLeft);
+    n.advance(Duration::from_millis(500));
+    assert_eq!(
+        n.state(),
+        NotchState::Collapsed,
+        "leaving the strip must close the notch"
+    );
+}
+
+#[test]
+fn moving_from_the_hot_zone_into_the_pill_keeps_it_open() {
+    // The cursor crossing from the strip into the pill fires a strip-leave
+    // immediately followed by a pill-enter. That must NOT close the notch.
+    let mut n = notch();
+    n.handle(NotchEvent::HotZoneEntered);
+    n.advance(Duration::from_millis(200));
+
+    n.handle(NotchEvent::HotZoneLeft);
+    n.handle(NotchEvent::PointerEntered);
+    n.advance(Duration::from_millis(800));
+    assert_eq!(
+        n.state(),
+        NotchState::Expanded,
+        "the pointer is inside the pill, so it stays open"
+    );
+}
+
+#[test]
 fn re_entering_during_collapse_cancels_it_without_a_jump() {
     let mut n = notch();
     n.handle(NotchEvent::HotZoneEntered);

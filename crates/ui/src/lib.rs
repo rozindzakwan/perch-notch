@@ -1,5 +1,20 @@
 #![forbid(unsafe_code)]
-//! Perch UI: rendering and the per-OS window shell.
+//! Perch's UI: rendering (`tiny-skia` into a `softbuffer` surface) and the
+//! per-OS window shell driven by `winit`.
+//!
+//! The crate itself forbids `unsafe`; the few OS style calls it needs are
+//! delegated to `perch-platform-windows` / `perch-platform-linux`, which own
+//! their `unsafe` blocks and document each one.
 
-/// Placeholder until the window shell lands.
+pub mod art;
+pub mod render;
+pub mod shell;
+pub mod text;
+pub mod theme;
+
+pub use render::{Collapsed, Frame, Renderer};
+pub use shell::{NotchWindows, ShellEvent};
+pub use theme::Palette;
+
+/// Which renderer this build uses, reported in logs and `--version` output.
 pub const RENDERER: &str = "tiny-skia/softbuffer";

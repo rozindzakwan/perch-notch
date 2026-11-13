@@ -25,9 +25,12 @@ pub enum NotchState {
 pub enum NotchEvent {
     /// The cursor entered the invisible hover strip.
     HotZoneEntered,
+    /// The cursor left the invisible hover strip. Treated as a pointer-leave,
+    /// because when the pill is open the cursor may never have entered it.
+    HotZoneLeft,
     /// The cursor entered the pill window itself.
     PointerEntered,
-    /// The cursor left the pill (or the hover strip without entering the pill).
+    /// The cursor left the pill.
     PointerLeft,
     /// The foreground window became (or stopped being) fullscreen.
     FullscreenChanged(bool),
@@ -149,7 +152,7 @@ impl Notch {
                 }
                 self.start_expanding()
             }
-            NotchEvent::PointerLeft => {
+            NotchEvent::HotZoneLeft | NotchEvent::PointerLeft => {
                 let was_inside = self.pointer_inside;
                 self.pointer_inside = false;
                 if self.pinned {

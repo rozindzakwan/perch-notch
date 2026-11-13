@@ -11,7 +11,7 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_EXCLUDED_FROM_PEEK};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     WS_EX_TOPMOST, WS_EX_TRANSPARENT,
 };
 
@@ -35,11 +35,18 @@ pub fn apply_notch_styles(hwnd: HWND) -> Result<isize> {
     // Get/SetWindowLongPtrW only read and write that window's style bits.
     let style = unsafe {
         let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        let wanted = current
+        // WS_EX_APPWINDOW must be *cleared*: winit sets it, and it forces a
+        // taskbar and Alt-Tab entry even alongside WS_EX_TOOLWINDOW.
+        // WS_EX_LAYERED is deliberately absent. A layered window is
+        // hit-tested per pixel against its alpha channel, so the hover strip
+        // (which never paints anything, and whose pixels are therefore fully
+        // transparent) would receive no WM_MOUSEMOVE at all and never fire
+        // CursorEntered. Transparency comes from winit's `with_transparent`
+        // via DWM composition instead, which keeps hit-testing intact.
+        let wanted = (current & !(WS_EX_APPWINDOW.0 as isize))
             | WS_EX_TOOLWINDOW.0 as isize
             | WS_EX_NOACTIVATE.0 as isize
-            | WS_EX_TOPMOST.0 as isize
-            | WS_EX_LAYERED.0 as isize;
+            | WS_EX_TOPMOST.0 as isize;
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, wanted);
         GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
     };
@@ -135,8 +142,9 @@ pub fn ex_style(hwnd: HWND) -> isize {
     unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) }
 }
 
-/// Whether all the notch style bits are present. The UI smoke test asserts this.
+/// Whether all the notch style bits are present *and* the taskbar/Alt-Tab bit
+/// is absent. The UI smoke test asserts exactly this against the live window.
 pub fn has_notch_styles(style: isize) -> bool {
     let want = WS_EX_TOOLWINDOW.0 as isize | WS_EX_NOACTIVATE.0 as isize | WS_EX_TOPMOST.0 as isize;
-    style & want == want
+    style & want == want && style & WS_EX_APPWINDOW.0 as isize == 0
 }

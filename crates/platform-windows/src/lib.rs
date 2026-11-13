@@ -1,5 +1,32 @@
 //! Windows backends for Perch.
+//!
+//! This crate is one of only two places where `unsafe` is permitted (the Linux
+//! X11 crate is the other), and every block carries a `// SAFETY:` comment.
+//! Everything here implements a trait from `perch_core::platform`, so the rest
+//! of the app never sees a Win32 type.
+
 #![cfg_attr(not(windows), allow(unused))]
 
-/// Crate-level marker so `cargo check` on non-Windows hosts still builds this crate.
+#[cfg(windows)]
+mod autostart;
+#[cfg(windows)]
+mod fullscreen;
+#[cfg(windows)]
+mod monitors;
+#[cfg(windows)]
+mod single_instance;
+#[cfg(windows)]
+pub mod window;
+
+#[cfg(windows)]
+pub use autostart::RegistryAutostart;
+#[cfg(windows)]
+pub use fullscreen::FullscreenDetector;
+#[cfg(windows)]
+pub use monitors::{monitor_under_cursor, WindowsMonitors};
+#[cfg(windows)]
+pub use single_instance::NamedPipeInstance;
+
+/// Platform marker, so this crate also compiles (empty) on other hosts and CI
+/// can `cargo check` the whole workspace from Linux.
 pub const PLATFORM: &str = "windows";

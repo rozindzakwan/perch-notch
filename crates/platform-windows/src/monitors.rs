@@ -6,12 +6,12 @@ use perch_core::platform::MonitorSource;
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT, TRUE};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO, MONITORINFOEXW,
-    MONITORINFOF_PRIMARY,
 };
 use windows::Win32::UI::HiDpi::{
-    GetDpiForMonitor, SetProcessDpiAwarenessContext, MDT_EFFECTIVE_DPI,
-    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    GetDpiForMonitor, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+    MDT_EFFECTIVE_DPI,
 };
+use windows::Win32::UI::WindowsAndMessaging::MONITORINFOF_PRIMARY;
 
 /// Enumerates monitors via `EnumDisplayMonitors`.
 #[derive(Debug, Default)]

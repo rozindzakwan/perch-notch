@@ -7,6 +7,10 @@ license.workspace = true
 description = "Perch - a lightweight dynamic notch / island for Windows and Linux"
 default-run = "perch"
 
+[lib]
+name = "perch_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "perch"
 path = "src/main.rs"
@@ -17,6 +21,35 @@ perch-ui = { path = "../ui" }
 anyhow.workspace = true
 log.workspace = true
 env_logger.workspace = true
+notify.workspace = true
+winit.workspace = true
+tiny-skia.workspace = true
+tray-icon = { workspace = true, features = ["libxdo"] }
+image = { workspace = true }
+ureq = { workspace = true, optional = true }
+rusqlite = { workspace = true, optional = true }
+
+[features]
+default = ["media", "lyrics", "productivity"]
+# Optional features are compile-time gated as well as config-gated, so a build
+# without them does not contain their code at all.
+media = []
+lyrics = ["ureq"]
+productivity = []
+screen-time = ["rusqlite"]
+clipboard = []
+white-noise = []
+speech = []
+screenshot = []
+camera = []
+all-features = [
+    "media",
+    "lyrics",
+    "productivity",
+    "screen-time",
+    "clipboard",
+    "white-noise",
+]
 
 [target.'cfg(windows)'.dependencies]
 perch-platform-windows = { path = "../platform-windows" }

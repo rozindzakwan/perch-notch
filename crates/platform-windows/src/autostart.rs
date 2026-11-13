@@ -57,9 +57,8 @@ impl Autostart for RegistryAutostart {
         let mut size = 0u32;
         // SAFETY: all pointers are either null (we only want the size) or valid
         // locals; `key.0` is open for reading.
-        let status = unsafe {
-            RegQueryValueExW(key.0, VALUE_NAME, None, None, None, Some(&mut size))
-        };
+        let status =
+            unsafe { RegQueryValueExW(key.0, VALUE_NAME, None, None, None, Some(&mut size)) };
         if status == ERROR_FILE_NOT_FOUND {
             return Ok(false);
         }

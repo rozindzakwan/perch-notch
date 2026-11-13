@@ -83,8 +83,12 @@ fn serve_one(tx: &Sender<String>) -> Result<()> {
             0,    // default timeout
             None, // default security: current user only
         )
+    };
+    if handle.is_invalid() {
+        return Err(Error::backend(
+            "CreateNamedPipeW returned an invalid handle",
+        ));
     }
-    .map_err(|e| Error::backend(format!("CreateNamedPipeW: {e}")))?;
 
     // SAFETY: `handle` is a pipe handle we just created and have not closed.
     let connected = unsafe { ConnectNamedPipe(handle, None) };
@@ -148,9 +152,7 @@ impl SingleInstance for NamedPipeInstance {
         let mut file = std::fs::OpenOptions::new()
             .write(true)
             .open(PIPE_NAME)
-            .map_err(|e| {
-                Error::unavailable("ipc", format!("no running Perch to talk to: {e}"))
-            })?;
+            .map_err(|e| Error::unavailable("ipc", format!("no running Perch to talk to: {e}")))?;
         file.write_all(command.as_bytes())
             .and_then(|()| file.write_all(b"\n"))
             .map_err(|e| Error::io("sending an IPC command", e))
