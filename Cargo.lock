@@ -2413,6 +2413,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
  "tiny-skia",
  "tray-icon",
  "ureq",

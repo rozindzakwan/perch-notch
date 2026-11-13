@@ -49,8 +49,12 @@ stage_build() {
 
 stage_smoke() {
     say "X11 smoke test (Xvfb + openbox), with and without a compositor"
-    PERCH_BIN="$(target_dir)/release/perch" scripts/smoke-x11.sh --out "$OUT" --compositor none
-    PERCH_BIN="$(target_dir)/release/perch" scripts/smoke-x11.sh --out "$OUT" --compositor picom
+    cargo build --release --locked -p perch-platform-linux --example mock_player
+    export PERCH_MOCK_PLAYER="$(target_dir)/release/examples/mock_player"
+    for comp in none picom; do
+        dbus-run-session -- env PERCH_BIN="$(target_dir)/release/perch" \
+            scripts/smoke-x11.sh --out "$OUT" --compositor "$comp"
+    done
 }
 
 stage_mpris() {

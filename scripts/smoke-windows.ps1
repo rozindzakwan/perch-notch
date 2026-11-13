@@ -156,11 +156,13 @@ function Move-MouseAbsolute([int]$X, [int]$Y) {
 }
 
 function Save-TopStripScreenshot([string]$Path) {
+    # Only the notch area: never capture the rest of the user's screen.
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-    $h = [Math]::Min(220, $screen.Height)
-    $bmp = New-Object System.Drawing.Bitmap $screen.Width, $h
+    $w = [Math]::Min(560, $screen.Width); $h = [Math]::Min(220, $screen.Height)
+    $x0 = [int]($screen.Width / 2 - $w / 2)
+    $bmp = New-Object System.Drawing.Bitmap $w, $h
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen(0, 0, 0, 0, (New-Object System.Drawing.Size $screen.Width, $h))
+    $g.CopyFromScreen($x0, 0, 0, 0, (New-Object System.Drawing.Size $w, $h))
     $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
     $g.Dispose(); $bmp.Dispose()
 }

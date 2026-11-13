@@ -40,6 +40,8 @@ windows = { version = "0.58", features = [
     "Win32_System_Ole",
     "Win32_System_Memory",
     "Win32_System_Console",
+    "Win32_System_WinRT",
+    "Media",
     "UI_Notifications",
     "Data_Xml_Dom",
 ] }

@@ -547,3 +547,21 @@ fn ensure_notch_states(conn: &RustConnection, st: &WatchState, win: Window) {
     let _ = conn.flush();
     log::debug!("requested keep-above/sticky/skip states for 0x{win:x}");
 }
+
+/// Without a compositor an ARGB window cannot be transparent, so the 2 px
+/// hover strip would show as a dark line. Give it a `ParentRelative`
+/// background instead: the X server then paints the root window's background
+/// (the wallpaper) into it, which is as close to invisible as X11 allows.
+pub fn make_background_parent_relative(win: u32) -> Result<()> {
+    use x11rb::protocol::xproto::BackPixmap;
+    let (conn, _) = shell_conn().ok_or_else(|| Error::unavailable("x11", "no connection"))?;
+    conn.change_window_attributes(
+        win,
+        &ChangeWindowAttributesAux::new().background_pixmap(BackPixmap::PARENT_RELATIVE),
+    )
+    .map_err(|e| Error::backend(format!("ParentRelative background: {e}")))?;
+    let _ = conn.clear_area(true, win, 0, 0, 0, 0);
+    conn.flush()
+        .map_err(|e| Error::backend(format!("flush: {e}")))?;
+    Ok(())
+}

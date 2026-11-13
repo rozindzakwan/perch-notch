@@ -151,3 +151,8 @@ pub fn fetch_async(
         log::warn!("cannot start the lyrics worker: {e}");
     }
 }
+
+/// Blocking lookup (no cache), for the opt-in live test and diagnostics.
+pub fn lookup(req: &LyricsRequest) -> Lookup {
+    fetch_network(req)
+}

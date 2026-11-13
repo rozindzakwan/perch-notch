@@ -14,6 +14,8 @@ pub mod events;
 #[cfg(windows)]
 mod fullscreen;
 #[cfg(windows)]
+pub mod media;
+#[cfg(windows)]
 mod monitors;
 #[cfg(windows)]
 pub mod services;
@@ -28,6 +30,8 @@ pub use autostart::RegistryAutostart;
 pub use events::{EventFlags, WindowsEvents};
 #[cfg(windows)]
 pub use fullscreen::FullscreenDetector;
+#[cfg(windows)]
+pub use media::SmtcMedia;
 #[cfg(windows)]
 pub use monitors::{monitor_under_cursor, WindowsMonitors};
 #[cfg(windows)]

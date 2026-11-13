@@ -186,7 +186,14 @@ impl NotchWindows {
             }
         };
         match (raw(&self.pill), raw(&self.hot)) {
-            (Some(pill), Some(hot)) => x11::apply_notch_properties(pill, hot),
+            (Some(pill), Some(hot)) => {
+                if self.opaque {
+                    if let Err(e) = x11::make_background_parent_relative(hot) {
+                        log::debug!("hover strip background: {e}");
+                    }
+                }
+                x11::apply_notch_properties(pill, hot)
+            }
             _ => {
                 // Wayland: no X11 properties to set. The layer-shell path is a
                 // documented best-effort limitation.

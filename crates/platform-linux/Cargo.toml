@@ -23,3 +23,6 @@ x11rb = { workspace = true, features = [
     "xtest",
     "shape",
 ] }
+
+[dev-dependencies]
+perch-core = { path = "../core" }

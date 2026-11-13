@@ -159,6 +159,29 @@ check cli_toggle_closes "$([ "$(STATUS .state)" = Collapsed ] && echo 1 || echo 
 sleep 0.5
 check cli_todo "$([ "$(STATUS .todos)" = 1 ] && echo 1 || echo 0)" "todos=$(STATUS .todos)"
 
+# Now playing over MPRIS, end to end (mock player -> D-Bus -> Perch), driven
+# with playerctl like a real desktop would. Needs a session bus.
+MOCK=${PERCH_MOCK_PLAYER:-}
+if [ -n "$MOCK" ] && [ -x "$MOCK" ] && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    "$MOCK" "Smoke Song" "Smoke Band" &
+    PIDS+=($!)
+    for _ in $(seq 50); do [ "$(STATUS .track)" = "Smoke Band - Smoke Song" ] && break; sleep 0.1; done
+    check mpris_track "$([ "$(STATUS .track)" = "Smoke Band - Smoke Song" ] && echo 1 || echo 0)" "track='$(STATUS .track)'"
+    playerctl --player=perchmock play-pause || info "playerctl failed"
+    for _ in $(seq 30); do [ "$(STATUS .playing)" = false ] && break; sleep 0.1; done
+    check mpris_playerctl_pause "$([ "$(STATUS .playing)" = false ] && echo 1 || echo 0)" "playing=$(STATUS .playing)"
+    "$BIN" play-pause
+    for _ in $(seq 30); do [ "$(STATUS .playing)" = true ] && break; sleep 0.1; done
+    check mpris_cli_resume "$([ "$(STATUS .playing)" = true ] && echo 1 || echo 0)" "playing=$(STATUS .playing)"
+    xdotool mousemove 960 0
+    sleep 0.8
+    import -window root -crop 1920x260+0+0 "$OUT/x11-media-$COMP.png" 2>/dev/null || true
+    xdotool mousemove 40 900
+    sleep 0.8
+else
+    info "MPRIS end-to-end skipped (set PERCH_MOCK_PLAYER and run under dbus-run-session)"
+fi
+
 # Fullscreen auto-hide (EWMH _NET_WM_STATE_FULLSCREEN via the WM). The
 # victim is Perch's own settings window: a normal, focusable top-level.
 "$BIN" settings

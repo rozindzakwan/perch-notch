@@ -353,8 +353,8 @@ impl MonitorSource for X11Monitors {
 }
 
 pub use crate::x11_watch::{
-    compositor_running, monitor_work_area, rounded_spans, set_rounded_shape, window_title,
-    work_area, WatchFlags, X11Watcher,
+    compositor_running, make_background_parent_relative, monitor_work_area, rounded_spans,
+    set_rounded_shape, window_title, work_area, WatchFlags, X11Watcher,
 };
 
 /// Parse `Xft.dpi` out of an X resource database string (the root window's

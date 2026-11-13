@@ -563,10 +563,18 @@ impl Model {
         if !matches!(ev, MediaEvent::Gone) {
             self.media_reported_at = now.instant;
         }
+        // Decoding cover art costs milliseconds; only redo it when the bytes
+        // actually changed (players re-report the same track often).
+        let new_cover = match ev {
+            MediaEvent::TrackChanged(track) => (self.media.track().map(|t| &t.cover)
+                != Some(&track.cover))
+            .then(|| track.cover.clone()),
+            _ => None,
+        };
         let changed = self.media.apply(ev);
         let mut fx = Vec::new();
-        if let MediaEvent::TrackChanged(track) = ev {
-            self.cover = track.cover.as_ref().and_then(|b| decode_cover(b));
+        if let Some(cover) = new_cover {
+            self.cover = cover.as_deref().and_then(decode_cover);
         }
         if matches!(ev, MediaEvent::Gone) {
             self.cover = None;
