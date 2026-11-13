@@ -6,10 +6,18 @@
 //! in `perch-platform-windows` / `perch-platform-linux`, plus a fake
 //! implementation here used by tests.
 
+pub mod clipboard;
 pub mod config;
 pub mod error;
 pub mod geometry;
+pub mod lrc;
+pub mod media;
 pub mod notch;
+pub mod platform;
+pub mod pomodoro;
+pub mod reminders;
+pub mod todo;
+pub mod usage;
 
 pub use error::{Error, Result};
 
