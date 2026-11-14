@@ -1,7 +1,8 @@
-PerchUI.ttf is DejaVu Sans 2.37, subset by scripts/subset-fonts.sh (fontTools) to the
-characters Inter lacks; it is only loaded when such a character is drawn. Renamed
-files and subsets keep the DejaVu name, which contains neither "Bitstream" nor
-"Vera", as the licence below requires.
+PerchSymbols.ttf and PerchScripts.ttf are DejaVu Sans 2.37, subset by
+scripts/subset-fonts.sh (fontTools) to the characters Inter lacks: common
+symbols and emoji, and other scripts plus rare symbols. Each is loaded only
+when such a character is drawn. The subsets keep the DejaVu name, which
+contains neither "Bitstream" nor "Vera", as the licence below requires.
 
 Fonts are (c) Bitstream (see below). DejaVu changes are in public domain.
 Glyphs imported from Arev fonts are (c) Tavmjong Bah (see below)

@@ -76,7 +76,9 @@ impl Palette {
     /// Dark glass, the default. `blur` = the OS blurs what is behind the
     /// window, so the fill can be more transparent.
     pub fn dark(blur: bool) -> Self {
-        let surface = rgba(18, 20, 28, if blur { 0.58 } else { 0.88 });
+        // Without blur (ADR-018) the window behind would read through a lighter
+        // fill; 0.94 keeps the panel legible over busy content.
+        let surface = rgba(18, 20, 28, if blur { 0.58 } else { 0.94 });
         Self {
             surface,
             bg: surface,
@@ -100,7 +102,7 @@ impl Palette {
 
     /// Light glass, for light desktops.
     pub fn light(blur: bool) -> Self {
-        let surface = rgba(246, 247, 250, if blur { 0.72 } else { 0.92 });
+        let surface = rgba(246, 247, 250, if blur { 0.72 } else { 0.96 });
         Self {
             surface,
             bg: surface,
@@ -152,9 +154,9 @@ mod tests {
     fn glass_fill_depends_on_blur() {
         let close = |a: f32, b: f32| (a - b).abs() < 0.01;
         assert!(close(Palette::dark(true).surface.alpha(), 0.58));
-        assert!(close(Palette::dark(false).surface.alpha(), 0.88));
+        assert!(close(Palette::dark(false).surface.alpha(), 0.94));
         assert!(close(Palette::light(true).surface.alpha(), 0.72));
-        assert!(close(Palette::light(false).surface.alpha(), 0.92));
+        assert!(close(Palette::light(false).surface.alpha(), 0.96));
     }
 
     #[test]

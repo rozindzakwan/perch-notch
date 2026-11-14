@@ -18,15 +18,17 @@ const FONT_REGULAR: usize = 0;
 const FONT_MEDIUM: usize = 1;
 const FONT_BOLD: usize = 2;
 const FONT_FALLBACK: usize = 3;
+const FONT_SCRIPTS: usize = 4;
 
 /// The embedded fonts plus a glyph cache.
 pub struct TextRenderer {
     /// Inter Regular, Medium, Bold.
     fonts: Vec<Font>,
-    /// DejaVu Sans, parsed on the first character Inter lacks: fontdue builds
-    /// every outline up front, so an unused fallback would cost memory for
-    /// nothing.
-    fallback: std::cell::OnceCell<Option<Font>>,
+    /// DejaVu Sans in two parts, each parsed on the first character that
+    /// needs it: symbols and emoji (`FONT_FALLBACK`), other scripts
+    /// plus rare symbols (`FONT_SCRIPTS`). fontdue builds every outline up
+    /// front, so an unused fallback would cost memory for nothing.
+    fallback: [std::cell::OnceCell<Option<Font>>; 2],
     cache: HashMap<(usize, char, u32), Glyph>,
     /// Widest digit advance per (font, size), for tabular numbers.
     digit_w: HashMap<(usize, u32), f32>,
@@ -79,7 +81,7 @@ impl TextRenderer {
         ];
         Ok(Self {
             fonts,
-            fallback: std::cell::OnceCell::new(),
+            fallback: [std::cell::OnceCell::new(), std::cell::OnceCell::new()],
             cache: HashMap::new(),
             digit_w: HashMap::new(),
         })
@@ -87,27 +89,54 @@ impl TextRenderer {
 
     /// Font by index; the fallback is loaded on first use.
     fn font(&self, i: usize) -> Option<&Font> {
-        if i == FONT_FALLBACK {
-            // DejaVu Sans, subset to what Inter lacks (scripts/subset-fonts.sh).
-            self.fallback
-                .get_or_init(|| {
-                    match load(include_bytes!("../assets/PerchUI.ttf"), "DejaVu Sans") {
-                        Ok(f) => Some(f),
-                        Err(e) => {
-                            log::warn!("{e}");
-                            None
-                        }
-                    }
-                })
-                .as_ref()
-        } else {
-            self.fonts.get(i)
-        }
+        // DejaVu Sans, subset to what Inter lacks (scripts/subset-fonts.sh).
+        let (slot, bytes, name): (usize, &'static [u8], &str) = match i {
+            FONT_FALLBACK => (
+                0,
+                include_bytes!("../assets/PerchSymbols.ttf"),
+                "DejaVu Sans symbols",
+            ),
+            FONT_SCRIPTS => (
+                1,
+                include_bytes!("../assets/PerchScripts.ttf"),
+                "DejaVu Sans scripts",
+            ),
+            _ => return self.fonts.get(i),
+        };
+        self.fallback[slot]
+            .get_or_init(|| match load(bytes, name) {
+                Ok(f) => Some(f),
+                Err(e) => {
+                    log::warn!("{e}");
+                    None
+                }
+            })
+            .as_ref()
     }
 
-    /// Whether the fallback font has been loaded (tests, diagnostics).
-    pub fn fallback_loaded(&self) -> bool {
-        self.fallback.get().is_some()
+    /// Whether the symbols / other-scripts fallbacks have been loaded (tests,
+    /// diagnostics).
+    pub fn fallbacks_loaded(&self) -> (bool, bool) {
+        (
+            self.fallback[0].get().is_some(),
+            self.fallback[1].get().is_some(),
+        )
+    }
+
+    /// Which fallback could hold `ch`, by the ranges each was subset to.
+    fn fallback_for(ch: char) -> usize {
+        match u32::from(ch) {
+            0x0530..=0x1DFF
+            | 0x1F00..=0x1FFF
+            | 0x2500..=0x259F
+            | 0x27C0..=0x28FF
+            | 0x2C00..=0x2E7F
+            | 0xA640..=0xA6FF
+            | 0xFB13..=0xFB4F
+            | 0xFE20..=0xFE2F
+            | 0x1D400..=0x1D7FF => FONT_SCRIPTS,
+            _ => FONT_FALLBACK,
+        }
     }
 
     /// Which font draws `ch` at `weight`: the Inter weight if it has the
@@ -123,10 +152,11 @@ impl TextRenderer {
                 .map(|f| f.lookup_glyph_index(ch) != 0)
                 .unwrap_or(false)
         };
+        let fallback = Self::fallback_for(ch);
         if ch.is_whitespace() || has(idx) {
             idx
-        } else if has(FONT_FALLBACK) {
-            FONT_FALLBACK
+        } else if has(fallback) {
+            fallback
         } else {
             idx
         }
@@ -421,9 +451,16 @@ mod tests {
     fn fallback_is_parsed_only_when_a_character_needs_it() {
         let mut t = TextRenderer::new().unwrap_or_else(|e| panic!("{e}"));
         let _ = t.measure("Perch \u{2022} \u{2014} J\u{fc}rgen 12:30", 14.0);
-        assert!(!t.fallback_loaded(), "Inter covers Latin text");
+        assert_eq!(t.fallbacks_loaded(), (false, false), "Inter covers Latin");
         let _ = t.measure("Halo \u{1F600}", 14.0);
-        assert!(t.fallback_loaded(), "the emoji needs DejaVu");
+        assert_eq!(
+            t.fallbacks_loaded(),
+            (true, false),
+            "an emoji loads only the symbols part"
+        );
+        let _ = t.measure("\u{5e9}\u{5dc}\u{5d5}\u{5dd}", 14.0); // Hebrew
+        assert_eq!(t.fallbacks_loaded(), (true, true));
+        assert_eq!(t.font_for('\u{5e9}', Weight::Medium), FONT_SCRIPTS);
     }
 
     #[test]

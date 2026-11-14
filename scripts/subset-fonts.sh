@@ -22,13 +22,20 @@ for w in Regular Medium Bold; do
         --output-file="$OUT/Inter-$w.ttf"
 done
 
-# DejaVu is only the fallback for what Inter lacks: drop the scripts Inter
-# covers, and Arabic presentation forms (only reachable through shaping).
-DEJAVU=U+0000-001F,U+0530-1DFF,U+1F00-1FFF,U+2000-2BFF,U+2C00-2E7F,U+3000-303F,U+A640-A6FF,U+FB13-FB4F,U+FE20-FE2F,U+FFF0-FFFF,U+1D400-1D7FF,U+1F000-1F0FF,U+1F300-1F6FF,U+1F900-1F9FF
-pyftsubset "$SRC/DejaVuSans.ttf" --unicodes="$DEJAVU" \
-    --layout-features='' --no-hinting \
-    --name-IDs='*' --name-languages='*' --notdef-outline \
-    --output-file="$OUT/PerchUI.ttf"
+# DejaVu is only the fallback for what Inter lacks, in two files so that an
+# emoji does not pull in every other script: common symbols and emoji, and
+# other scripts plus rare symbols (Armenian, Hebrew, Arabic, Georgian, box
+# drawing, braille, math alphanumerics; Arabic presentation forms
+# are left out, they are only reachable through shaping). The script ranges
+# must match `TextRenderer::fallback_for`.
+SYMBOLS=U+0000-001F,U+2000-24FF,U+25A0-27BF,U+2900-2BFF,U+3000-303F,U+FFF0-FFFF,U+1F000-1F0FF,U+1F300-1F6FF,U+1F900-1F9FF
+SCRIPTS=U+0000-001F,U+0530-1DFF,U+1F00-1FFF,U+2500-259F,U+27C0-28FF,U+2C00-2E7F,U+A640-A6FF,U+FB13-FB4F,U+FE20-FE2F,U+1D400-1D7FF
+for part in Symbols:$SYMBOLS Scripts:$SCRIPTS; do
+    pyftsubset "$SRC/DejaVuSans.ttf" --unicodes="${part#*:}" \
+        --layout-features='' --no-hinting \
+        --name-IDs='*' --name-languages='*' --notdef-outline \
+        --output-file="$OUT/Perch${part%%:*}.ttf"
+done
 
 ls -l "$OUT"/*.ttf
 sha256sum "$OUT"/*.ttf
