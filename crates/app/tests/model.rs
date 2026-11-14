@@ -894,3 +894,30 @@ mod banners {
         assert!(banner_title(&mut both, now).is_some());
     }
 }
+
+#[test]
+fn ipc_todo_takes_an_optional_relative_due_time() {
+    let now = t0();
+    let mut m = Model::new(config_all(), now);
+    m.command("todo +2s Tea is ready", now);
+    m.command("todo Plain item", now);
+    m.command("todo +lots of work", now);
+    let items: Vec<(String, Option<u64>)> = m
+        .todos()
+        .all()
+        .iter()
+        .map(|i| (i.text.clone(), i.due))
+        .collect();
+    assert!(
+        items.contains(&("Tea is ready".to_string(), Some(now.unix + 2))),
+        "{items:?}"
+    );
+    assert!(
+        items.contains(&("Plain item".to_string(), None)),
+        "{items:?}"
+    );
+    assert!(
+        items.contains(&("+lots of work".to_string(), None)),
+        "not a due time: kept as text: {items:?}"
+    );
+}

@@ -145,6 +145,12 @@ fn due_parsing() {
     assert!(parse_due("noon", now, 0).is_err());
     assert!(parse_due("+0m", now, 0).is_err());
     assert!(parse_due("+3x", now, 0).is_err());
+    assert_eq!(
+        parse_due("+30s", now, 0),
+        Ok(Some(now + 30)),
+        "seconds for quick timers"
+    );
+    assert!(parse_due("+0s", now, 0).is_err());
 }
 
 #[test]

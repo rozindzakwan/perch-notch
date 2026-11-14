@@ -183,7 +183,8 @@ pub fn usage() -> String {
          \u{20}   settings        Open the settings window\n\
          \u{20}   quit            Ask the running instance to exit\n\
          \u{20}   pin             Keep the notch open until pinned again\n\
-         \u{20}   todo <TEXT>     Add a to-do item\n\
+         \u{20}   todo [DUE] <TEXT>\n\
+         \u{20}                   Add a to-do item; DUE is +30s, +10m, +2h or HH:MM\n\
          \u{20}   play-pause, next, previous\n\
          \u{20}                   Control the current media player\n\
          \u{20}   tab <NAME>      Open a tab: music tasks clips shelf mixer sounds time tools mail\n\

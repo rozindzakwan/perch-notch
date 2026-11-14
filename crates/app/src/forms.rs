@@ -292,8 +292,8 @@ pub fn todo_spec() -> FormSpec {
 /// Parse a due-time field into unix seconds.
 ///
 /// Accepts `HH:MM` (24 h; today, or tomorrow if that time already passed),
-/// `+Nm` / `+Nh` (relative), or empty (no due time). `offset` is the local UTC
-/// offset in seconds.
+/// `+Ns` / `+Nm` / `+Nh` (relative), or empty (no due time). `offset` is the
+/// local UTC offset in seconds.
 pub fn parse_due(input: &str, now_unix: u64, offset: i32) -> Result<Option<u64>, String> {
     let s = input.trim().to_ascii_lowercase();
     if s.is_empty() {
@@ -306,12 +306,13 @@ pub fn parse_due(input: &str, now_unix: u64, offset: i32) -> Result<Option<u64>,
             .parse()
             .map_err(|_| format!("\"{input}\" is not a duration"))?;
         let secs = match unit.trim() {
+            "s" | "sec" | "secs" => n,
             "" | "m" | "min" | "mins" => n * 60,
             "h" | "hr" | "hrs" => n * 3600,
-            _ => return Err(format!("unknown unit in \"{input}\"; use m or h")),
+            _ => return Err(format!("unknown unit in \"{input}\"; use s, m or h")),
         };
         if secs == 0 || secs > 7 * 86_400 {
-            return Err("pick something between 1 minute and 7 days".into());
+            return Err("pick something between 1 second and 7 days".into());
         }
         return Ok(Some(now_unix + secs));
     }

@@ -924,7 +924,22 @@ impl Model {
             "play-pause" => self.action(Action::Transport(TransportCommand::PlayPause), now),
             "next" => self.action(Action::Transport(TransportCommand::Next), now),
             "previous" | "prev" => self.action(Action::Transport(TransportCommand::Previous), now),
-            "todo" if !rest.is_empty() => self.add_todo(rest, None, now),
+            "todo" if !rest.is_empty() => {
+                // An optional due time first: `+10m`, `+30s`, `+2h` or `14:30`.
+                let (first, text) = rest.split_once(' ').unwrap_or((rest, ""));
+                let looks_like_due = first.starts_with('+') || first.contains(':');
+                let offset = if first.contains(':') {
+                    crate::sys::utc_offset_seconds()
+                } else {
+                    0
+                };
+                match crate::forms::parse_due(first, now.unix, offset) {
+                    Ok(Some(due)) if looks_like_due && !text.trim().is_empty() => {
+                        self.add_todo(text.trim(), Some(due), now)
+                    }
+                    _ => self.add_todo(rest, None, now),
+                }
+            }
             "tab" => match parse_tab(rest) {
                 Some(t) => self.action(Action::SelectTab(t), now),
                 None => Vec::new(),
