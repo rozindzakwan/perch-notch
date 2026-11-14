@@ -111,6 +111,8 @@ pub struct Status {
     pub mail_accounts: Vec<String>,
     /// The newest unread message as "sender - subject".
     pub mail_latest: String,
+    /// Title of the banner showing in the notch (empty = none).
+    pub banner: String,
 }
 
 /// Write the status file if `$PERCH_STATUS_FILE` is set and it changed.

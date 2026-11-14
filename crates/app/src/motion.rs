@@ -20,9 +20,10 @@ pub struct UiMotion {
     tab: Spring,
     width: Spring,
     height: Spring,
+    pill_h: Spring,
     hover: f32,
     reduced: bool,
-    started: (bool, bool),
+    started: (bool, bool, bool),
 }
 
 impl UiMotion {
@@ -32,9 +33,10 @@ impl UiMotion {
             tab: Spring::new(0.0),
             width: Spring::new(0.0),
             height: Spring::new(0.0),
+            pill_h: Spring::new(0.0),
             hover: 1.0,
             reduced,
-            started: (false, false),
+            started: (false, false, false),
         }
     }
 
@@ -45,6 +47,7 @@ impl UiMotion {
             self.tab.snap(self.tab.target());
             self.width.snap(self.width.target());
             self.height.snap(self.height.target());
+            self.pill_h.snap(self.pill_h.target());
             self.hover = 1.0;
         }
     }
@@ -76,6 +79,22 @@ impl UiMotion {
         }
     }
 
+    /// The collapsed pill wants this height (taller while a banner shows;
+    /// the first target snaps).
+    pub fn target_pill_height(&mut self, h: f32) {
+        if !self.started.2 || self.reduced {
+            self.pill_h.snap(h);
+            self.started.2 = true;
+        } else if (self.pill_h.target() - h).abs() > 0.5 {
+            self.pill_h.set_target(h);
+        }
+    }
+
+    /// Animated collapsed pill height.
+    pub fn pill_height(&self) -> f32 {
+        self.pill_h.value()
+    }
+
     /// The hovered element changed: its highlight fades in from nothing.
     pub fn hover_changed(&mut self) {
         self.hover = if self.reduced { 1.0 } else { 0.0 };
@@ -102,7 +121,11 @@ impl UiMotion {
     }
 
     fn moving(&self) -> bool {
-        !self.tab.settled() || !self.width.settled() || !self.height.settled() || self.hover < 1.0
+        !self.tab.settled()
+            || !self.width.settled()
+            || !self.height.settled()
+            || !self.pill_h.settled()
+            || self.hover < 1.0
     }
 
     /// Advance by `dt`. Returns true while anything still moves.
@@ -110,6 +133,7 @@ impl UiMotion {
         self.tab.step(dt, TAB_SETTLE);
         self.width.step(dt, SIZE_SETTLE);
         self.height.step(dt, SIZE_SETTLE);
+        self.pill_h.step(dt, SIZE_SETTLE);
         if self.hover < 1.0 {
             self.hover = (self.hover + dt.as_secs_f32() / HOVER_FADE.as_secs_f32()).min(1.0);
         }

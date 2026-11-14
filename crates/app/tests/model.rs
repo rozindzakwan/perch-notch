@@ -36,6 +36,8 @@ fn config_all() -> Config {
     f.shelf = true;
     f.reminders = true;
     f.volume_mixer = true;
+    // Existing tests assert the system notification effect as well.
+    c.notifications.system = true;
     c
 }
 
@@ -399,7 +401,10 @@ fn dropping_a_file_with_the_shelf_off_explains_instead_of_failing() {
     let now = t0();
     let mut m = Model::new(Config::default(), now);
     m.file_dropped("/tmp/x".into(), false, now);
-    assert!(matches!(m.collapsed(), CollapsedView::Message(_)));
+    assert!(
+        m.view(now).banner.is_some(),
+        "the explanation shows as a banner"
+    );
 }
 
 #[test]
@@ -529,13 +534,14 @@ fn notification_failure_is_degradable() {
     let mut fake = FakePlatform::default();
     fake.fail_notifications("no daemon");
     assert!(fake.notify("x", "y").is_err());
-    // The model still flashed the message in the pill, so nothing is lost.
+    // The model still shows the reminder in the notch, so nothing is lost.
     let now = t0();
     let mut cfg = config_all();
     cfg.reminders.water_minutes = 1;
     let mut m = Model::new(cfg, now);
     carry_out(&m.tick(now.plus(Duration::from_secs(61))), &mut fake);
-    assert!(matches!(m.collapsed(), CollapsedView::Message(s) if s.contains("water")));
+    let title = m.view(now).banner.map(|b| b.title).unwrap_or_default();
+    assert!(title.contains("water"), "{title}");
 }
 
 #[cfg(feature = "mail")]
@@ -761,4 +767,130 @@ fn mail_rows_have_avatar_sender_subject_age() {
         "{:?}",
         r.leading
     );
+}
+
+#[cfg(feature = "mail")]
+mod banners {
+    use super::*;
+    use perch_core::config::MailAccount;
+    use perch_core::mail::{MailItem, MailUpdate};
+
+    fn cfg(system: bool, subject: bool) -> Config {
+        let mut c = config_all();
+        c.features.mail = true;
+        c.notifications.in_notch = true;
+        c.notifications.system = system;
+        c.mail.notify_subject = subject;
+        c.mail.accounts.push(MailAccount {
+            name: "Work".into(),
+            username: "user@example.com".into(),
+            host: "mail.example.com".into(),
+            ..MailAccount::default()
+        });
+        c
+    }
+
+    fn snap(uids: &[u32]) -> MailUpdate {
+        MailUpdate::Snapshot {
+            account: "Work".into(),
+            uid_validity: 1,
+            unread: uids.len() as u32,
+            items: uids
+                .iter()
+                .rev()
+                .map(|u| MailItem {
+                    uid: *u,
+                    from: format!("Sender {u}"),
+                    subject: format!("Subject {u}"),
+                    date_unix: Some(1_700_000_000),
+                })
+                .collect(),
+        }
+    }
+
+    fn banner_title(m: &mut Model, now: Now) -> Option<String> {
+        m.view(now).banner.map(|b| b.title)
+    }
+
+    #[test]
+    fn no_banner_while_expanded_but_badges_update() {
+        let now = t0();
+        let mut m = Model::new(cfg(false, true), now);
+        m.mail_update(snap(&[1]));
+        m.set_panel_state(true, true, now);
+        m.mail_update(snap(&[1, 2]));
+        assert_eq!(
+            banner_title(&mut m, now),
+            None,
+            "the open panel shows it in place"
+        );
+        assert!(
+            matches!(m.collapsed(), CollapsedView::Pill { ref badges, .. } if badges[0].count == 2)
+        );
+    }
+
+    #[test]
+    fn fullscreen_defers_only_the_latest_banner() {
+        let now = t0();
+        let mut m = Model::new(cfg(false, true), now);
+        m.set_panel_state(false, false, now);
+        m.flash("first", now);
+        m.flash("second", now);
+        assert_eq!(
+            banner_title(&mut m, now),
+            None,
+            "nothing pops up over a fullscreen app"
+        );
+        m.set_panel_state(false, true, now);
+        assert_eq!(banner_title(&mut m, now).as_deref(), Some("second"));
+        m.tick(now.plus(Duration::from_secs(5)));
+        assert_eq!(
+            banner_title(&mut m, now.plus(Duration::from_secs(5))),
+            None,
+            "only the latest was kept"
+        );
+    }
+
+    #[test]
+    fn banner_click_opens_its_tab() {
+        let now = t0();
+        let mut m = Model::new(cfg(false, true), now);
+        m.mail_update(snap(&[1]));
+        m.mail_update(snap(&[1, 2]));
+        assert_eq!(
+            banner_title(&mut m, now).as_deref(),
+            Some("New mail from Sender 2")
+        );
+        let fx = m.action(Action::BannerOpen, now);
+        assert!(fx.contains(&Effect::OpenPanel), "{fx:?}");
+        assert_eq!(m.tab(), Some(Tab::Mail));
+        assert_eq!(banner_title(&mut m, now), None, "the banner is dismissed");
+    }
+
+    #[test]
+    fn notify_subject_false_hides_subject_in_banner() {
+        let now = t0();
+        let mut m = Model::new(cfg(false, false), now);
+        m.mail_update(snap(&[1]));
+        m.mail_update(snap(&[1, 2]));
+        let b = m.view(now).banner.unwrap_or_else(|| panic!("banner"));
+        assert_eq!(b.title, "New mail from Sender 2");
+        assert_eq!(b.body, "", "no subject");
+    }
+
+    #[test]
+    fn system_toast_only_when_enabled() {
+        let now = t0();
+        let toast = |fx: &[Effect]| fx.iter().any(|e| matches!(e, Effect::Notify { .. }));
+        let mut quiet = Model::new(cfg(false, true), now);
+        quiet.mail_update(snap(&[1]));
+        let fx = quiet.mail_update(snap(&[1, 2]));
+        assert!(!toast(&fx), "in-notch only by default");
+        assert!(banner_title(&mut quiet, now).is_some());
+        let mut both = Model::new(cfg(true, true), now);
+        both.mail_update(snap(&[1]));
+        let fx = both.mail_update(snap(&[1, 2]));
+        assert!(toast(&fx), "system notifications when enabled");
+        assert!(banner_title(&mut both, now).is_some());
+    }
 }

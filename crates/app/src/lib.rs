@@ -8,6 +8,7 @@
 //! `unsafe` and no Win32 or X11 types.
 
 pub mod backends;
+pub mod banner;
 #[cfg(feature = "camera")]
 pub mod camera;
 pub mod cli;

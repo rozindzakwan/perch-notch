@@ -114,6 +114,8 @@ pub enum Action {
     OpenSettings,
     /// Pin/unpin the notch open.
     PinToggle,
+    /// The banner was clicked: open the panel on its tab.
+    BannerOpen,
 }
 
 /// A small icon the pill can show when there is no cover art. The renderer
@@ -146,6 +148,19 @@ pub struct Badge {
     pub kind: BadgeKind,
     /// How many.
     pub count: u32,
+}
+
+/// A notification shown in the notch: the pill stretches into this banner.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BannerView {
+    /// Avatar or icon.
+    pub leading: RowLeading,
+    /// Bold first line.
+    pub title: String,
+    /// Second line (may be empty).
+    pub body: String,
+    /// The tab a click opens.
+    pub tab: Option<Tab>,
 }
 
 /// The collapsed pill's content.
@@ -212,6 +227,8 @@ pub enum RowKind {
     Warning,
     /// An ambient sound.
     Sound,
+    /// Mail.
+    Mail,
 }
 
 /// What sits at the start of a row.
@@ -409,6 +426,8 @@ pub struct PanelView {
     pub body: Body,
     /// Whether the notch is pinned open (pin icon state).
     pub pinned: bool,
+    /// A notification banner to show in the collapsed pill.
+    pub banner: Option<BannerView>,
 }
 
 impl Default for PanelView {
@@ -419,6 +438,7 @@ impl Default for PanelView {
             tab: None,
             body: Body::Empty("Nothing enabled. Open settings to turn features on.".into()),
             pinned: false,
+            banner: None,
         }
     }
 }

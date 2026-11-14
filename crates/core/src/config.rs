@@ -304,6 +304,25 @@ impl HotkeysConfig {
     }
 }
 
+/// How notifications are shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NotificationsConfig {
+    /// Show alerts as banners in the notch itself.
+    pub in_notch: bool,
+    /// Also show system notifications (Windows toasts, freedesktop).
+    pub system: bool,
+}
+
+impl Default for NotificationsConfig {
+    fn default() -> Self {
+        Self {
+            in_notch: true,
+            system: false,
+        }
+    }
+}
+
 /// One mail account (read-only IMAP). The password is never stored here; it
 /// lives in the OS keychain under [`MailAccount::secret_key`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -444,6 +463,8 @@ pub struct Config {
     pub hotkeys: HotkeysConfig,
     /// Read-only mail.
     pub mail: MailConfig,
+    /// Where alerts appear.
+    pub notifications: NotificationsConfig,
 }
 
 impl Config {

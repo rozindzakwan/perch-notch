@@ -164,6 +164,14 @@ impl Renderer {
         let mut ctx = Ctx::new(pm, &mut self.text, &mut self.fx, pal, s);
         ctx.cursor = frame.cursor;
         ctx.hover = frame.hover_alpha.clamp(0.0, 1.0);
+        let banner = view.banner.as_ref().filter(|_| !open);
+        if let Some(b) = banner {
+            // The pill has stretched into a notification banner.
+            glass::banner(&mut ctx, panel, &leading_of(&b.leading), &b.title, &b.body);
+            ctx.button(panel, Action::BannerOpen);
+            let hits = std::mem::take(&mut ctx.hits);
+            return hits;
+        }
         glass::surface(&mut ctx, panel, r, None, 0.0);
 
         if open {
@@ -746,16 +754,21 @@ fn kind_icon(k: perch_core::view::RowKind) -> Icon {
         RowKind::Folder => Icon::Shelf,
         RowKind::Warning => Icon::Warning,
         RowKind::Sound => Icon::Waves,
+        RowKind::Mail => Icon::Mail,
     }
 }
 
 /// The leading element a row asks for (a check wins when the row has one).
 fn row_leading(r: &Row) -> glass::Leading {
-    use perch_core::view::RowLeading;
     if let Some(done) = r.check {
         return glass::Leading::Check(done);
     }
-    match &r.leading {
+    leading_of(&r.leading)
+}
+
+fn leading_of(l: &perch_core::view::RowLeading) -> glass::Leading {
+    use perch_core::view::RowLeading;
+    match l {
         RowLeading::None => glass::Leading::None,
         RowLeading::Avatar { initials, seed } => glass::Leading::Avatar {
             initials: initials.clone(),

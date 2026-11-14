@@ -85,6 +85,8 @@ pub struct LyricsRequest {
 pub enum Effect {
     /// Repaint the notch.
     Redraw,
+    /// Open the panel (a banner was clicked).
+    OpenPanel,
     /// Show a desktop notification.
     Notify {
         /// Title.
@@ -174,6 +176,14 @@ pub struct Model {
     clip_thumbs: std::collections::HashMap<u64, (Arc<Vec<u8>>, u32)>,
 
     message: Option<(String, Instant)>,
+    /// In-notch notification banners.
+    banners: crate::banner::BannerQueue,
+    /// Latest banner raised while hidden by a fullscreen app.
+    deferred_banner: Option<perch_core::view::BannerView>,
+    /// The panel is open (banners are not shown then).
+    panel_expanded: bool,
+    /// The notch is visible (not hidden by a fullscreen app).
+    visible: bool,
     last_tick: Instant,
     /// A stretch reminder came due and is waiting for an idle measurement.
     pending_stretch: bool,
@@ -205,6 +215,10 @@ impl Model {
             mail: MailBoard::default(),
             clip_thumbs: std::collections::HashMap::new(),
             message: None,
+            banners: Default::default(),
+            deferred_banner: None,
+            panel_expanded: false,
+            visible: true,
             last_tick: now.instant,
             pending_stretch: false,
         };
@@ -300,7 +314,23 @@ impl Model {
                         .join(", "),
                 ),
             };
-            fx.push(Effect::Notify { summary, body });
+            let leading = match fresh.as_slice() {
+                [(_, m)] => RowLeading::Avatar {
+                    initials: perch_core::view::initials(&m.from),
+                    seed: perch_core::view::seed(&m.from),
+                },
+                _ => RowLeading::Kind(RowKind::Mail),
+            };
+            let at = self.last_tick;
+            fx.extend(self.alert_at(
+                perch_core::view::BannerView {
+                    leading,
+                    title: summary,
+                    body,
+                    tab: Some(Tab::Mail),
+                },
+                at,
+            ));
         }
         fx
     }
@@ -456,9 +486,78 @@ impl Model {
         fx
     }
 
-    /// Show a transient message in the collapsed pill.
+    /// Show a short message: a banner in the notch, or (with in-notch
+    /// notifications off, or while the panel is open) text in the pill.
     pub fn flash(&mut self, text: impl Into<String>, now: Now) {
-        self.message = Some((text.into(), now.instant));
+        let text = text.into();
+        if self.config.notifications.in_notch && !self.panel_expanded {
+            let b = perch_core::view::BannerView {
+                leading: RowLeading::None,
+                title: text,
+                body: String::new(),
+                tab: None,
+            };
+            if self.visible {
+                self.banners.push(b, now.instant);
+            } else {
+                self.deferred_banner = Some(b);
+            }
+        } else {
+            self.message = Some((text, now.instant));
+        }
+    }
+
+    /// Raise an alert: a banner (in-notch notifications) and/or a system
+    /// notification, per `[notifications]`.
+    fn alert(&mut self, b: perch_core::view::BannerView, now: Now) -> Vec<Effect> {
+        self.alert_at(b, now.instant)
+    }
+
+    fn alert_at(&mut self, b: perch_core::view::BannerView, at: Instant) -> Vec<Effect> {
+        let n = self.config.notifications;
+        let mut fx = vec![Effect::Redraw];
+        if n.system || !n.in_notch {
+            fx.push(Effect::Notify {
+                summary: b.title.clone(),
+                body: b.body.clone(),
+            });
+        }
+        if !n.in_notch {
+            self.message = Some((b.title, at));
+        } else if self.panel_expanded {
+            // The open panel shows the change in place.
+        } else if !self.visible {
+            self.deferred_banner = Some(b);
+        } else {
+            self.banners.push(b, at);
+        }
+        fx
+    }
+
+    /// The shell reports whether the panel is open and whether the notch is
+    /// visible. Opening clears banners; becoming visible shows the latest
+    /// one raised meanwhile.
+    pub fn set_panel_state(&mut self, expanded: bool, visible: bool, now: Now) {
+        if expanded && !self.panel_expanded {
+            self.banners.clear();
+        }
+        self.panel_expanded = expanded;
+        self.visible = visible;
+        if visible && !expanded {
+            if let Some(b) = self.deferred_banner.take() {
+                self.banners.push(b, now.instant);
+            }
+        }
+    }
+
+    /// The pointer is (or stopped being) over the banner: pause it.
+    pub fn banner_hover(&mut self, inside: bool, now: Now) {
+        self.banners.hover(inside, now.instant);
+    }
+
+    /// A banner is showing.
+    pub fn has_banner(&self) -> bool {
+        !self.panel_expanded && self.banners.current().is_some()
     }
 
     /// Advance all timers to `now` and return what came due.
@@ -473,6 +572,9 @@ impl Model {
                 fx.push(Effect::Redraw);
             }
         }
+        if self.banners.tick(now.instant) {
+            fx.push(Effect::Redraw);
+        }
 
         if self.is_active(Feature::Pomodoro) && self.pomodoro.state() == TimerState::Running {
             for ev in self.pomodoro.tick(dt) {
@@ -481,11 +583,15 @@ impl Model {
                         Phase::Work => ("Focus session done", "Time for a break."),
                         Phase::ShortBreak | Phase::LongBreak => ("Break over", "Back to focus."),
                     };
-                    self.flash(summary, now);
-                    fx.push(Effect::Notify {
-                        summary: summary.into(),
-                        body: body.into(),
-                    });
+                    fx.extend(self.alert(
+                        perch_core::view::BannerView {
+                            leading: RowLeading::None,
+                            title: summary.into(),
+                            body: body.into(),
+                            tab: Some(Tab::Tasks),
+                        },
+                        now,
+                    ));
                 }
             }
             fx.push(Effect::Redraw);
@@ -510,11 +616,15 @@ impl Model {
             for id in due {
                 if let Some(item) = self.todos.get(id) {
                     let text = item.text.clone();
-                    self.flash(format!("Due: {text}"), now);
-                    fx.push(Effect::Notify {
-                        summary: "To-do due".into(),
-                        body: text,
-                    });
+                    fx.extend(self.alert(
+                        perch_core::view::BannerView {
+                            leading: RowLeading::None,
+                            title: "To-do due".into(),
+                            body: text,
+                            tab: Some(Tab::Tasks),
+                        },
+                        now,
+                    ));
                 }
                 self.todos.mark_notified(id);
                 fx.push(Effect::SaveTodos);
@@ -532,14 +642,15 @@ impl Model {
             ReminderKind::Water => ("Drink some water", "Stay hydrated."),
             ReminderKind::Stretch => ("Time to stretch", "You've been at it a while; stand up."),
         };
-        self.flash(summary, now);
-        vec![
-            Effect::Notify {
-                summary: summary.into(),
+        self.alert(
+            perch_core::view::BannerView {
+                leading: RowLeading::None,
+                title: summary.into(),
                 body: body.into(),
+                tab: Some(Tab::Tasks),
             },
-            Effect::Redraw,
-        ]
+            now,
+        )
     }
 
     /// The shell measured idle time after a [`Effect::QueryIdle`].
@@ -568,6 +679,7 @@ impl Model {
     /// `None` means it can sleep until the next external event.
     pub fn next_deadline(&self, now: Now, expanded: bool) -> Option<Duration> {
         let mut ds: Vec<Option<Duration>> = Vec::new();
+        ds.push(self.banners.next_deadline(now.instant));
         if let Some((_, at)) = &self.message {
             ds.push(Some(
                 MESSAGE_TTL.saturating_sub(now.instant.saturating_duration_since(*at)),
@@ -828,6 +940,15 @@ impl Model {
     pub fn action(&mut self, action: Action, now: Now) -> Vec<Effect> {
         let redraw = vec![Effect::Redraw];
         match action {
+            Action::BannerOpen => {
+                if let Some(b) = self.banners.dismiss(now.instant) {
+                    if let Some(t) = b.tab.filter(|t| self.tabs().contains(t)) {
+                        self.tab = Some(t);
+                        self.scroll = 0;
+                    }
+                }
+                vec![Effect::OpenPanel, Effect::Redraw]
+            }
             Action::SelectTab(t) => {
                 if self.tabs().contains(&t) {
                     self.tab = Some(t);
@@ -1272,6 +1393,11 @@ impl Model {
             tab: self.tab,
             body,
             pinned: self.pinned,
+            banner: if self.panel_expanded {
+                None
+            } else {
+                self.banners.current().cloned()
+            },
         }
     }
 

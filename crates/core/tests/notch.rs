@@ -460,3 +460,31 @@ fn content_fades_in_after_40_percent() {
         "hidden at once when closing"
     );
 }
+
+#[test]
+fn pointer_over_a_banner_does_not_expand_but_the_edge_and_a_click_do() {
+    let mut n = spring_notch();
+    n.set_banner(true);
+    n.handle(NotchEvent::PointerEntered);
+    assert_eq!(
+        n.state(),
+        NotchState::Collapsed,
+        "hovering a banner pauses it, nothing more"
+    );
+    n.handle(NotchEvent::HotZoneEntered);
+    assert_eq!(
+        n.state(),
+        NotchState::Expanding,
+        "the top edge still opens the panel"
+    );
+    let mut n = spring_notch();
+    n.set_banner(true);
+    n.handle(NotchEvent::PointerEntered);
+    n.handle(NotchEvent::Open);
+    assert_eq!(
+        n.state(),
+        NotchState::Expanding,
+        "clicking the banner opens it"
+    );
+    n.set_banner(false);
+}

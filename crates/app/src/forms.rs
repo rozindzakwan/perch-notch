@@ -83,6 +83,19 @@ pub fn settings_spec(cfg: &Config, monitors: &[Monitor]) -> FormSpec {
         disabled: false,
     });
 
+    fields.push(Field::Heading("Notifications".into()));
+    fields.push(Field::Toggle {
+        id: "notify_in_notch".into(),
+        label: "Show notifications in the notch".into(),
+        value: cfg.notifications.in_notch,
+        disabled: false,
+    });
+    fields.push(Field::Toggle {
+        id: "notify_system".into(),
+        label: "Also show system notifications".into(),
+        value: cfg.notifications.system,
+        disabled: false,
+    });
     fields.push(Field::Heading("Features".into()));
     for f in Feature::ALL {
         let mut label = f.label().to_string();
@@ -196,6 +209,8 @@ pub fn apply_settings_event(cfg: &Config, monitors: &[Monitor], ev: &FormEvent) 
         FormEvent::Toggled(id, v) => match id.as_str() {
             "hide_on_fullscreen" => next.notch.hide_on_fullscreen = *v,
             "autostart" => next.autostart = *v,
+            "notify_in_notch" => next.notifications.in_notch = *v,
+            "notify_system" => next.notifications.system = *v,
             other => {
                 let Some(f) = Feature::ALL.iter().find(|f| feature_id(**f) == other) else {
                     return SettingsOutcome::None;

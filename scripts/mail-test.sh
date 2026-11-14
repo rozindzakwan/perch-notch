@@ -191,6 +191,13 @@ if until_status '.mail_unread' 6 10; then
 else
     check new_mail_pushed 0 "mail_unread=$(STATUS .mail_unread) after 10 s"
 fi
+# The new mail shows as a banner in the notch, then goes away by itself.
+SHOWN=""
+for _ in $(seq 20); do SHOWN=$(STATUS .banner); [ -n "$SHOWN" ] && break; sleep 0.1; done
+check banner_shows_for_new_mail "$([ -n "$SHOWN" ] && echo 1 || echo 0)" "banner: '$SHOWN'"
+GONE=0
+for _ in $(seq 100); do [ -z "$(STATUS .banner)" ] && { GONE=1; break; }; sleep 0.1; done
+check banner_goes_away "$GONE" "banner cleared $([ "$GONE" = 1 ] && echo 'within 10 s' || echo "still '$(STATUS .banner)' after 10 s")"
 
 # Read-only: Dovecot must still consider every message unseen.
 SEEN=$( (doveadm -c "$M/dovecot.conf" search -u test@example.com mailbox INBOX SEEN 2>>"$M/doveadm.err" || true) | wc -l)

@@ -145,3 +145,28 @@ fn due_parsing() {
     assert!(parse_due("+0m", now, 0).is_err());
     assert!(parse_due("+3x", now, 0).is_err());
 }
+
+#[test]
+fn notification_toggles_edit_the_config() {
+    let cfg = Config::default();
+    assert!(
+        cfg.notifications.in_notch && !cfg.notifications.system,
+        "in-notch only by default"
+    );
+    let SettingsOutcome::Changed(c) = apply_settings_event(
+        &cfg,
+        &monitors(),
+        &FormEvent::Toggled("notify_system".into(), true),
+    ) else {
+        panic!("system toggle")
+    };
+    assert!(c.notifications.system);
+    let SettingsOutcome::Changed(c) = apply_settings_event(
+        &c,
+        &monitors(),
+        &FormEvent::Toggled("notify_in_notch".into(), false),
+    ) else {
+        panic!("in-notch toggle")
+    };
+    assert!(!c.notifications.in_notch);
+}

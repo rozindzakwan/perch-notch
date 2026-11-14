@@ -99,6 +99,7 @@ fn every_panel_renders_at_several_scales() {
                 tab: Some(Tab::Media),
                 body,
                 pinned: false,
+                banner: None,
             };
             let w = (480.0 * scale) as u32;
             let h = (200.0 * scale) as u32;
@@ -126,6 +127,7 @@ fn tabs_are_clickable_and_slider_clicks_carry_a_value() {
         tab: Some(Tab::Sounds),
         body: bodies().remove(3),
         pinned: true,
+        banner: None,
     };
     let (_, hits) = render(&view, 480, 200, 1.0, 1.0);
     let tab = hits
@@ -251,6 +253,7 @@ fn tabs_use_icons_and_report_one_hit_each() {
         tab: Some(Tab::Mail),
         body: Body::Empty(String::new()),
         pinned: false,
+        banner: None,
     };
     let (_, hits) = render(&view, 380, 300, 1.0, 1.0);
     let tab_hits = hits
@@ -273,6 +276,7 @@ fn content_alpha_zero_draws_no_body_text() {
         tab: Some(Tab::Media),
         body,
         pinned: false,
+        banner: None,
     };
     let draw = |v: &PanelView, alpha: f32| {
         let mut r = Renderer::new().unwrap_or_else(|e| panic!("{e}"));
@@ -304,6 +308,7 @@ fn panel_render(body: Body, tab: Tab, pal: Palette) -> (Pixmap, Vec<perch_core::
         tab: Some(tab),
         body,
         pinned: false,
+        banner: None,
     };
     let mut r = Renderer::new().unwrap_or_else(|e| panic!("{e}"));
     let mut pm = Pixmap::new(380, 300).unwrap_or_else(|| panic!("pixmap"));
@@ -470,6 +475,7 @@ fn list_render(
             header: Some(("Accounts".into(), Action::OpenSettings)),
         },
         pinned: false,
+        banner: None,
     };
     let (w, h) = ((380.0 * scale) as u32, (300.0 * scale) as u32);
     let mut r = Renderer::new().unwrap_or_else(|e| panic!("{e}"));
@@ -559,6 +565,7 @@ fn render_body(
         tab: Some(tab),
         body,
         pinned: false,
+        banner: None,
     };
     let (w, h) = ((380.0 * scale) as u32, (300.0 * scale) as u32);
     let mut r = Renderer::new().unwrap_or_else(|e| panic!("{e}"));

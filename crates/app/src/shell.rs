@@ -225,7 +225,18 @@ impl Shell {
             self.motion
                 .target_size(min as f32, self.model.panel_height_hint() as f32);
         }
+        let banner = self.model.has_banner();
+        self.notch.set_banner(banner);
+        if banner {
+            self.motion.target_size(
+                300.0f32.max(min as f32),
+                self.model.panel_height_hint() as f32,
+            );
+        }
+        self.motion
+            .target_pill_height(if banner { 56.0 } else { geo.collapsed.1 as f32 });
         geo.collapsed.0 = self.motion.width().round().max(1.0) as u32;
+        geo.collapsed.1 = self.motion.pill_height().round().max(1.0) as u32;
         geo.expanded.1 = self.motion.height().round().max(1.0) as u32;
         geo
     }
@@ -409,6 +420,12 @@ impl Shell {
             _ => String::new(),
         };
         let shot_open = self.shot.is_some();
+        let view_banner = self
+            .model
+            .view(Now::real())
+            .banner
+            .map(|b| b.title)
+            .unwrap_or_default();
         let status = Status {
             shot_open,
             mixer_sessions: self
@@ -418,6 +435,7 @@ impl Shell {
                 .map(|s| s.name.clone())
                 .collect(),
             lyrics_loaded: self.model.has_lyrics(),
+            banner: view_banner,
             mail_unread: self.model.mail().total_unread(),
             mail_accounts: self
                 .model
@@ -600,6 +618,11 @@ impl Shell {
         while let Some(effect) = queue.pop_front() {
             match effect {
                 Effect::Redraw => self.request_redraw(),
+                Effect::OpenPanel => {
+                    if self.notch.handle(NotchEvent::Open) {
+                        self.after_notch_change(el);
+                    }
+                }
                 Effect::Notify { summary, body } => {
                     if let Err(e) = self.services.notifier.notify(&summary, &body) {
                         log::info!("notification shown in the notch only: {e}");
@@ -1395,6 +1418,7 @@ impl ApplicationHandler<UserEvent> for Shell {
             WindowEvent::CursorEntered { .. } => {
                 if id == pill_id {
                     self.cursor_inside = true;
+                    self.model.banner_hover(true, Now::real());
                 }
                 let ev = if id == hot_id {
                     NotchEvent::HotZoneEntered
@@ -1408,6 +1432,7 @@ impl ApplicationHandler<UserEvent> for Shell {
             WindowEvent::CursorLeft { .. } => {
                 if id == pill_id {
                     self.cursor_inside = false;
+                    self.model.banner_hover(false, Now::real());
                     self.request_redraw();
                 }
                 // Crossing from the strip into the pill fires HotZoneLeft then
@@ -1527,9 +1552,13 @@ impl ApplicationHandler<UserEvent> for Shell {
             self.place();
             self.request_redraw();
         }
+        self.model
+            .set_panel_state(self.expanded(), self.notch.is_visible(), Now::real());
         let fx = self.model.tick(Now::real());
         let queued = std::mem::take(&mut self.queued);
         self.run_effects(el, fx.into_iter().chain(queued).collect());
+        // Banners come and go with model time; keep the window sized to them.
+        self.place();
         if self.model.is_active(Feature::Shelf) && !self.model.shelf().is_empty() && self.expanded()
         {
             let fx = self.model.prune_shelf(|p| p.exists());

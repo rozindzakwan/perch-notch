@@ -244,6 +244,22 @@ fn main() {
     let ph = (32.0 * scale) as u32;
     let f = Frame::new(pw, ph, scale, pal);
     save("pill", pw, ph, &f, &pill, &mut r);
+    // A new-mail banner.
+    let banner = PanelView {
+        banner: Some(perch_core::view::BannerView {
+            leading: perch_core::view::RowLeading::Avatar {
+                initials: "BB".into(),
+                seed: perch_core::view::seed("Build Bot"),
+            },
+            title: "Build Bot".into(),
+            body: "Nightly build passed".into(),
+            tab: Some(Tab::Mail),
+        }),
+        ..PanelView::default()
+    };
+    let (bw, bh) = ((300.0 * scale) as u32, (56.0 * scale) as u32);
+    let f = Frame::new(bw, bh, scale, pal);
+    save("banner", bw, bh, &f, &banner, &mut r);
     // Panels with a shadow margin, as the app draws them.
     let m = 12.0 * scale;
     let (lw, lh) = (380.0 * scale, 300.0 * scale);
@@ -254,6 +270,7 @@ fn main() {
             tab: Some(tab),
             body,
             pinned: false,
+            banner: None,
         };
         let (w, h) = ((lw + 2.0 * m) as u32, (lh + m) as u32);
         let mut f = Frame::new(w, h, scale, pal);

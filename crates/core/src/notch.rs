@@ -45,6 +45,9 @@ pub enum NotchEvent {
     Toggle,
     /// Force the notch shut, e.g. on Escape.
     ForceCollapse,
+    /// Open the panel (a click on a banner); it closes again when the
+    /// pointer leaves, like a hover.
+    Open,
 }
 
 /// What the renderer needs for the current frame.
@@ -79,6 +82,9 @@ pub struct Notch {
     content: f32,
     /// OS asks for reduced motion: no springs or slides.
     reduced: bool,
+    /// A banner is showing in the pill: pointing at it must not open the
+    /// panel (it only pauses the banner).
+    banner: bool,
     expand_duration: Duration,
     collapse_duration: Duration,
     collapse_delay: Duration,
@@ -104,6 +110,7 @@ impl Notch {
             collapse_elapsed: Duration::ZERO,
             content: 0.0,
             reduced: reduced_motion,
+            banner: false,
             expand_duration: animation,
             collapse_duration: animation.mul_f32(0.56),
             collapse_delay,
@@ -127,6 +134,11 @@ impl Notch {
     /// Open-ness for the current frame.
     pub fn progress(&self) -> f32 {
         self.p
+    }
+
+    /// A banner is (or stopped being) shown in the pill.
+    pub fn set_banner(&mut self, on: bool) {
+        self.banner = on;
     }
 
     /// Follow the OS reduced-motion setting from now on.
@@ -200,6 +212,10 @@ impl Notch {
                     // Remember the hover; it is honored when fullscreen ends.
                     return !was_inside;
                 }
+                if self.banner && event == NotchEvent::PointerEntered && !self.in_hot {
+                    // Over a banner: pause it, don't open the panel.
+                    return !was_inside;
+                }
                 self.start_expanding()
             }
             NotchEvent::HotZoneLeft | NotchEvent::PointerLeft => {
@@ -259,6 +275,13 @@ impl Notch {
                     self.start_collapsing();
                 }
                 true
+            }
+            NotchEvent::Open => {
+                self.pending_collapse = None;
+                if !self.is_visible() {
+                    return false;
+                }
+                self.start_expanding()
             }
             NotchEvent::ForceCollapse => {
                 self.pinned = false;
