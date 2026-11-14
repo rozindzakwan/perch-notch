@@ -527,6 +527,11 @@ fn draw_panel(ctx: &mut Ctx<'_>, view: &PanelView, panel: (f32, f32, f32, f32), 
     match &view.body {
         Body::Media(m) => return music(ctx, m, body),
         Body::Tasks(t) => return tasks(ctx, t, body),
+        Body::List {
+            rows,
+            empty,
+            header,
+        } => return list(ctx, rows, empty, header.as_ref(), body),
         _ => {}
     }
     // Screens not yet restyled go through the older painter.
@@ -1294,7 +1299,6 @@ fn tasks(ctx: &mut Ctx<'_>, t: &TasksView, (x, y, w, h): (f32, f32, f32, f32)) {
                 break;
             }
             let done = row.check.unwrap_or(false);
-            let chip = row.remove.clone().map(|a| ("Delete", a));
             glass::row(
                 ctx,
                 (x - 6.0 * s, top, w + 12.0 * s, rh),
@@ -1302,7 +1306,8 @@ fn tasks(ctx: &mut Ctx<'_>, t: &TasksView, (x, y, w, h): (f32, f32, f32, f32)) {
                 &row.text,
                 None,
                 (!row.detail.is_empty()).then_some(row.detail.as_str()),
-                chip,
+                None,
+                row.remove.clone(),
                 row.primary.clone(),
                 row.dim,
             );
@@ -1331,5 +1336,96 @@ fn tasks(ctx: &mut Ctx<'_>, t: &TasksView, (x, y, w, h): (f32, f32, f32, f32)) {
             );
             ctx.button(rect, Action::TodoAdd);
         }
+    }
+}
+
+fn kind_icon(k: perch_core::view::RowKind) -> Icon {
+    use perch_core::view::RowKind;
+    match k {
+        RowKind::Text => Icon::Text,
+        RowKind::Image => Icon::Image,
+        RowKind::Link => Icon::Link,
+        RowKind::File => Icon::Text,
+        RowKind::Folder => Icon::Shelf,
+        RowKind::Warning => Icon::Warning,
+    }
+}
+
+/// The leading element a row asks for (a check wins when the row has one).
+fn row_leading(r: &Row) -> glass::Leading {
+    use perch_core::view::RowLeading;
+    if let Some(done) = r.check {
+        return glass::Leading::Check(done);
+    }
+    match &r.leading {
+        RowLeading::None => glass::Leading::None,
+        RowLeading::Avatar { initials, seed } => glass::Leading::Avatar {
+            initials: initials.clone(),
+            seed: *seed,
+        },
+        RowLeading::Kind(k) => glass::Leading::Icon(kind_icon(*k), None),
+        RowLeading::Thumb(px, side) => glass::Leading::Thumb(px.clone(), *side),
+    }
+}
+
+/// A list body: "N items" + header chip, then rows (two lines when they
+/// have a subtitle), or the empty text.
+fn list(
+    ctx: &mut Ctx<'_>,
+    rows: &[Row],
+    empty: &str,
+    header: Option<&(String, Action)>,
+    (x, y, w, h): (f32, f32, f32, f32),
+) {
+    let s = ctx.s;
+    let muted = ctx.fade(ctx.pal.fg, crate::tokens::SECONDARY_ALPHA);
+    let mut top = y;
+    if let Some((label, action)) = header {
+        let hh = 22.0 * s;
+        let count = format!(
+            "{} item{}",
+            rows.len(),
+            if rows.len() == 1 { "" } else { "s" }
+        );
+        ctx.text(&count, x, top, hh, text::CAPTION, muted, w / 2.0);
+        glass::chip(ctx, x + w, top, label, action.clone());
+        top += hh + 6.0 * s;
+    }
+    if rows.is_empty() {
+        let tw = ctx.measure(empty, text::BODY).min(w);
+        ctx.text(
+            empty,
+            x + (w - tw) / 2.0,
+            top,
+            (y + h - top).max(24.0 * s),
+            text::BODY,
+            muted,
+            w,
+        );
+        return;
+    }
+    for r in rows {
+        let rh = if r.subtitle.is_some() {
+            crate::tokens::space::ROW2
+        } else {
+            crate::tokens::space::ROW1
+        } * s;
+        if top + rh > y + h + 1.0 {
+            break;
+        }
+        let chip = r.chip.as_ref().map(|(l, a)| (l.as_str(), a.clone()));
+        glass::row(
+            ctx,
+            (x - 6.0 * s, top, w + 12.0 * s, rh),
+            &row_leading(r),
+            &r.text,
+            r.subtitle.as_deref(),
+            (!r.detail.is_empty()).then_some(r.detail.as_str()),
+            chip,
+            r.remove.clone(),
+            r.primary.clone(),
+            r.dim,
+        );
+        top += rh;
     }
 }

@@ -25,7 +25,8 @@ use perch_core::todo::TodoList;
 use perch_core::usage::{DayId, UsageTracker, UtcOffset};
 use perch_core::view::{
     clock, human_duration, Action, Badge, BadgeKind, Body, CollapsedView, Glyph, MediaView,
-    PanelView, PomodoroView, Row, SliderRow, SliderTarget, Tab, TasksView, UsageBar,
+    PanelView, PomodoroView, Row, RowKind, RowLeading, SliderRow, SliderTarget, Tab, TasksView,
+    UsageBar,
 };
 
 use crate::features::{ActiveFeatures, Feature};
@@ -169,6 +170,8 @@ pub struct Model {
     noise: NoiseMix,
     usage: UsageTracker,
     mail: MailBoard,
+    /// Small thumbnails of clipboard images, made once per entry.
+    clip_thumbs: std::collections::HashMap<u64, (Arc<Vec<u8>>, u32)>,
 
     message: Option<(String, Instant)>,
     last_tick: Instant,
@@ -200,6 +203,7 @@ impl Model {
             sessions: Vec::new(),
             noise: NoiseMix::default(),
             mail: MailBoard::default(),
+            clip_thumbs: std::collections::HashMap::new(),
             message: None,
             last_tick: now.instant,
             pending_stretch: false,
@@ -721,7 +725,18 @@ impl Model {
         if !self.is_active(Feature::Clipboard) {
             return Vec::new();
         }
-        match self.clipboard.push_with_flags(content, now.unix, flags) {
+        let thumb = match &content {
+            ClipboardContent::Image { bytes, .. } => decode_thumb(bytes, 56),
+            _ => None,
+        };
+        let outcome = self.clipboard.push_with_flags(content, now.unix, flags);
+        if let (PushOutcome::Stored { id, .. }, Some(t)) = (&outcome, thumb) {
+            self.clip_thumbs.insert(id.0, t);
+        }
+        let live: std::collections::HashSet<u64> =
+            self.clipboard.iter().map(|e| e.id().0).collect();
+        self.clip_thumbs.retain(|id, _| live.contains(id));
+        match outcome {
             PushOutcome::Skipped(reason) => {
                 log::debug!("clipboard entry skipped: {reason:?}");
                 Vec::new()
@@ -1070,6 +1085,23 @@ impl Model {
                             primary: Some(Action::ClipCopy(e.id())),
                             remove: Some(Action::ClipRemove(e.id())),
                             dim: false,
+                            leading: match e.content() {
+                                ClipboardContent::Text { .. } => {
+                                    let t = e.as_text().unwrap_or_default();
+                                    let t = t.trim_start();
+                                    if t.starts_with("http://") || t.starts_with("https://") {
+                                        RowLeading::Kind(RowKind::Link)
+                                    } else {
+                                        RowLeading::Kind(RowKind::Text)
+                                    }
+                                }
+                                _ => match self.clip_thumbs.get(&e.id().0) {
+                                    Some((px, side)) => RowLeading::Thumb(px.clone(), *side),
+                                    None => RowLeading::Kind(RowKind::Image),
+                                },
+                            },
+                            subtitle: None,
+                            chip: Some(("Copy".into(), Action::ClipCopy(e.id()))),
                         })
                         .collect(),
                     empty: "Copy something and it shows up here.".into(),
@@ -1093,6 +1125,13 @@ impl Model {
                             primary: Some(Action::ShelfCopy(i.id)),
                             remove: Some(Action::ShelfRemove(i.id)),
                             dim: false,
+                            leading: RowLeading::Kind(if i.is_dir {
+                                RowKind::Folder
+                            } else {
+                                RowKind::File
+                            }),
+                            subtitle: None,
+                            chip: Some(("Copy".into(), Action::ShelfCopy(i.id))),
                         })
                         .collect(),
                     empty: "Drop files here to park them.".into(),
@@ -1158,12 +1197,15 @@ impl Model {
                             primary: Some(Action::OpenSettings),
                             remove: None,
                             dim: true,
+                            leading: RowLeading::Kind(RowKind::Warning),
+                            subtitle: None,
+                            chip: None,
                         })
                         .collect();
                     let several = self.mail.accounts().len() > 1;
                     rows.extend(self.mail.items().into_iter().skip(self.scroll).map(
                         |(acct, m)| Row {
-                            text: format!("{} \u{2014} {}", m.from, m.subject),
+                            text: m.from.clone(),
                             detail: match (m.date_unix, several) {
                                 (Some(t), true) => format!("{acct} \u{00b7} {}", ago(now.unix, t)),
                                 (Some(t), false) => ago(now.unix, t),
@@ -1174,6 +1216,12 @@ impl Model {
                             primary: None,
                             remove: None,
                             dim: false,
+                            leading: RowLeading::Avatar {
+                                initials: perch_core::view::initials(&m.from),
+                                seed: perch_core::view::seed(&m.from),
+                            },
+                            subtitle: Some(m.subject.clone()),
+                            chip: None,
                         },
                     ));
                     let connecting = self
@@ -1327,6 +1375,7 @@ impl Model {
                     primary: Some(Action::TodoToggle(i.id)),
                     remove: Some(Action::TodoRemove(i.id)),
                     dim: i.done,
+                    ..Row::default()
                 })
                 .collect()
         });
@@ -1408,6 +1457,13 @@ fn due_label(now: u64, due: u64) -> String {
 }
 
 /// Decode cover art into a small square RGBA buffer for the renderer.
+/// A square RGBA thumbnail of an encoded image (clipboard rows).
+fn decode_thumb(bytes: &[u8], side: u32) -> Option<(Arc<Vec<u8>>, u32)> {
+    let img = image::load_from_memory(bytes).ok()?;
+    let thumb = img.resize_to_fill(side, side, image::imageops::FilterType::Triangle);
+    Some((Arc::new(thumb.to_rgba8().into_raw()), side))
+}
+
 fn decode_cover(bytes: &[u8]) -> Option<(Arc<Vec<u8>>, u32)> {
     let img = image::load_from_memory(bytes).ok()?;
     let side = 128u32;

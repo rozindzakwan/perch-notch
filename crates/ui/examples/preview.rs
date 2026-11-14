@@ -37,6 +37,20 @@ fn row(text: &str, detail: &str) -> Row {
         primary: Some(Action::OpenSettings),
         remove: None,
         dim: false,
+        ..Row::default()
+    }
+}
+
+fn mail(sender: &str, subject: &str, age: &str) -> Row {
+    Row {
+        text: sender.into(),
+        subtitle: Some(subject.into()),
+        detail: age.into(),
+        leading: perch_core::view::RowLeading::Avatar {
+            initials: perch_core::view::initials(sender),
+            seed: perch_core::view::seed(sender),
+        },
+        ..Row::default()
     }
 }
 
@@ -81,9 +95,9 @@ fn panels() -> Vec<(&'static str, Tab, Body)> {
             Tab::Mail,
             Body::List {
                 rows: vec![
-                    row("Ann Lee \u{2014} Quarterly report", "2m"),
-                    row("J\u{fc}rgen M. \u{2014} Halo \u{1F600}", "14m"),
-                    row("Build Bot \u{2014} Nightly build passed", "1h"),
+                    mail("Ann Lee", "Quarterly report", "2m"),
+                    mail("J\u{fc}rgen M.", "Halo \u{1F600}", "14m"),
+                    mail("Build Bot", "Nightly build passed", "1h"),
                 ],
                 empty: "No unread mail.".into(),
                 header: Some(("Accounts".into(), Action::OpenSettings)),

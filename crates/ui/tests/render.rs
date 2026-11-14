@@ -56,6 +56,7 @@ fn bodies() -> Vec<Body> {
                 primary: Some(Action::TodoAdd),
                 remove: Some(Action::OpenSettings),
                 dim: false,
+                ..Row::default()
             }]),
             reminder: Some("Water in 12 min".into()),
         }),
@@ -433,6 +434,7 @@ fn todo_rows_have_round_checks_and_an_add_row() {
         primary: Some(Action::TodoToggle(perch_core::todo::TodoId(id))),
         remove: Some(Action::TodoRemove(perch_core::todo::TodoId(id))),
         dim: false,
+        ..Row::default()
     };
     let body = Body::Tasks(TasksView {
         pomodoro: None,
@@ -450,4 +452,96 @@ fn todo_rows_have_round_checks_and_an_add_row() {
     assert!(has(Action::TodoToggle(perch_core::todo::TodoId(1))));
     assert!(has(Action::TodoToggle(perch_core::todo::TodoId(2))));
     assert!(has(Action::TodoAdd), "an add-a-task row");
+}
+
+fn list_render(
+    rows: Vec<Row>,
+    scale: f32,
+    cursor: Option<(f32, f32)>,
+) -> Vec<perch_core::view::Hit> {
+    let view = PanelView {
+        collapsed: CollapsedView::Idle,
+        tabs: vec![Tab::Mail],
+        tab: Some(Tab::Mail),
+        body: Body::List {
+            rows,
+            empty: "No unread mail.".into(),
+            header: Some(("Accounts".into(), Action::OpenSettings)),
+        },
+        pinned: false,
+    };
+    let (w, h) = ((380.0 * scale) as u32, (300.0 * scale) as u32);
+    let mut r = Renderer::new().unwrap_or_else(|e| panic!("{e}"));
+    let mut pm = Pixmap::new(w, h).unwrap_or_else(|| panic!("pixmap"));
+    let mut frame = Frame::new(w, h, scale, Palette::dark(false));
+    frame.progress = 1.0;
+    frame.cursor = cursor;
+    r.draw(&mut pm, &frame, &view)
+}
+
+fn mail_row(sender: &str, subject: &str) -> Row {
+    Row {
+        text: sender.into(),
+        subtitle: Some(subject.into()),
+        detail: "2m".into(),
+        leading: perch_core::view::RowLeading::Avatar {
+            initials: perch_core::view::initials(sender),
+            seed: perch_core::view::seed(sender),
+        },
+        primary: Some(Action::TodoAdd),
+        chip: Some(("Open".into(), Action::OpenSettings)),
+        ..Row::default()
+    }
+}
+
+#[test]
+fn long_subject_and_emoji_never_leave_the_row() {
+    let subject = "😀 Привет ".repeat(5) + &"very long subject ".repeat(18);
+    for scale in [1.0_f32, 1.5] {
+        let probe = list_render(vec![mail_row("Владимир Иванов", &subject)], scale, None);
+        let row = probe
+            .iter()
+            .find(|h| h.kind == perch_core::view::HitKind::Button(Action::TodoAdd))
+            .unwrap_or_else(|| panic!("row hit"))
+            .clone();
+        let hits = list_render(
+            vec![mail_row("Владимир Иванов", &subject)],
+            scale,
+            Some((row.x + row.w / 2.0, row.y + row.h / 2.0)),
+        );
+        let chip = hits
+            .iter()
+            .find(|h| {
+                h.kind == perch_core::view::HitKind::Button(Action::OpenSettings) && h.y >= row.y
+            })
+            .unwrap_or_else(|| panic!("hover chip"));
+        assert!(
+            chip.x >= row.x
+                && chip.x + chip.w <= row.x + row.w + 0.5
+                && chip.y >= row.y
+                && chip.y + chip.h <= row.y + row.h + 0.5,
+            "chip {chip:?} inside row {row:?} at {scale}x"
+        );
+    }
+}
+
+#[test]
+fn chip_appears_only_on_hover() {
+    let rows = || vec![mail_row("Ann Lee", "Quarterly report")];
+    let probe = list_render(rows(), 1.0, None);
+    let row = probe
+        .iter()
+        .find(|h| h.kind == perch_core::view::HitKind::Button(Action::TodoAdd))
+        .unwrap_or_else(|| panic!("row hit"))
+        .clone();
+    let chips = |hits: &[perch_core::view::Hit]| {
+        hits.iter()
+            .filter(|h| {
+                h.kind == perch_core::view::HitKind::Button(Action::OpenSettings) && h.y >= row.y
+            })
+            .count()
+    };
+    assert_eq!(chips(&probe), 0, "no chip without hover");
+    let hovered = list_render(rows(), 1.0, Some((row.x + 20.0, row.y + row.h / 2.0)));
+    assert_eq!(chips(&hovered), 1, "chip while hovered");
 }

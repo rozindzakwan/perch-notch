@@ -82,6 +82,7 @@ fn row_hover_changes_only_when_cursor_inside() {
                 Some("2m"),
                 None,
                 None,
+                None,
                 false,
             );
         }

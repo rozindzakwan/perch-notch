@@ -112,6 +112,7 @@ pub fn row(
     subtitle: Option<&str>,
     trailing: Option<&str>,
     chip_label: Option<(&str, Action)>,
+    remove: Option<Action>,
     primary: Option<Action>,
     dim: bool,
 ) {
@@ -130,9 +131,27 @@ pub fn row(
     let lw = leading(ctx, lead, x + pad, y + (h - d) / 2.0, d);
     let tx = x + pad + if lw > 0.0 { lw + 10.0 * s } else { 4.0 * s };
     let mut right = x + w - pad;
-    if let (true, Some((label, action))) = (hovered, chip_label.clone()) {
-        let cw = chip(ctx, right, y + (h - 22.0 * s) / 2.0, label, action);
-        right -= cw + 8.0 * s;
+    if hovered && (chip_label.is_some() || remove.is_some()) {
+        if let Some(a) = remove {
+            let d = 22.0 * s;
+            let (bx, by) = (right - d, y + (h - d) / 2.0);
+            ctx.rrect((bx, by, d, d), d / 2.0, ctx.pal.raised[1]);
+            let isz = 10.0 * s;
+            let c = ctx.fade(ctx.pal.fg, 0.8);
+            ctx.icon(
+                Icon::Close,
+                bx + (d - isz) / 2.0,
+                by + (d - isz) / 2.0,
+                isz,
+                c,
+            );
+            ctx.button((bx, by, d, d), a);
+            right -= d + 6.0 * s;
+        }
+        if let Some((label, action)) = chip_label {
+            let cw = chip(ctx, right, y + (h - 22.0 * s) / 2.0, label, action);
+            right -= cw + 8.0 * s;
+        }
     } else if let Some(t) = trailing {
         let tw = ctx.measure(t, text::CAPTION).min(w * 0.4);
         let muted = ctx.fade(ctx.pal.fg, SECONDARY_ALPHA);

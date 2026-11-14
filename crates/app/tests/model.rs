@@ -610,7 +610,8 @@ mod mail {
             panic!("mail tab is a list")
         };
         assert_eq!(rows.len(), 5);
-        assert!(rows[0].text.contains("Sender 5") && rows[0].text.contains("Subject 5"));
+        assert_eq!(rows[0].text, "Sender 5");
+        assert_eq!(rows[0].subtitle.as_deref(), Some("Subject 5"));
         assert!(
             rows.iter()
                 .all(|r| r.primary.is_none() && r.remove.is_none()),
@@ -718,4 +719,46 @@ fn panel_height_follows_the_tab_within_the_maximum() {
     let clips = m.panel_height_hint();
     assert!((200..=300).contains(&media), "media {media}");
     assert_eq!(clips, 300, "a long list is capped at expanded_height");
+}
+
+#[cfg(feature = "mail")]
+#[test]
+fn mail_rows_have_avatar_sender_subject_age() {
+    use perch_core::config::MailAccount;
+    use perch_core::mail::{MailItem, MailUpdate};
+    use perch_core::view::RowLeading;
+    let now = t0();
+    let mut cfg = config_all();
+    cfg.features.mail = true;
+    cfg.mail.accounts.push(MailAccount {
+        name: "Work".into(),
+        username: "user@example.com".into(),
+        host: "mail.example.com".into(),
+        ..MailAccount::default()
+    });
+    let mut m = Model::new(cfg, now);
+    m.mail_update(MailUpdate::Snapshot {
+        account: "Work".into(),
+        uid_validity: 1,
+        unread: 1,
+        items: vec![MailItem {
+            uid: 1,
+            from: "Ann Lee".into(),
+            subject: "Quarterly report".into(),
+            date_unix: Some(now.unix - 120),
+        }],
+    });
+    m.action(Action::SelectTab(Tab::Mail), now);
+    let Body::List { rows, .. } = m.view(now).body else {
+        panic!("mail is a list")
+    };
+    let r = &rows[0];
+    assert_eq!(r.text, "Ann Lee");
+    assert_eq!(r.subtitle.as_deref(), Some("Quarterly report"));
+    assert_eq!(r.detail, "2m");
+    assert!(
+        matches!(&r.leading, RowLeading::Avatar { initials, .. } if initials == "AL"),
+        "{:?}",
+        r.leading
+    );
 }

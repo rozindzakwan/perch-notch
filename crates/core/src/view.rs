@@ -194,8 +194,45 @@ pub struct MediaView {
     pub next_lyric: Option<String>,
 }
 
+/// What kind of thing a row shows (picks its icon).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RowKind {
+    /// Text.
+    #[default]
+    Text,
+    /// An image.
+    Image,
+    /// A link.
+    Link,
+    /// A file.
+    File,
+    /// A folder.
+    Folder,
+    /// Something needs attention.
+    Warning,
+}
+
+/// What sits at the start of a row.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum RowLeading {
+    /// Nothing (or a check, when the row has `check`).
+    #[default]
+    None,
+    /// Initials on a gradient disc.
+    Avatar {
+        /// One or two letters.
+        initials: String,
+        /// Stable hash; picks the gradient.
+        seed: u64,
+    },
+    /// A kind icon.
+    Kind(RowKind),
+    /// A small image (straight RGBA8, square side).
+    Thumb(std::sync::Arc<Vec<u8>>, u32),
+}
+
 /// One row in a list.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Row {
     /// Main text.
     pub text: String,
@@ -209,6 +246,36 @@ pub struct Row {
     pub remove: Option<Action>,
     /// Dim the row (done items, missing files).
     pub dim: bool,
+    /// Leading avatar, icon or thumbnail.
+    pub leading: RowLeading,
+    /// Second line under the main text.
+    pub subtitle: Option<String>,
+    /// A button shown while the row is hovered.
+    pub chip: Option<(String, Action)>,
+}
+
+/// Initials for an avatar: the first letter of the first two words (emoji
+/// and punctuation skipped, addresses use the part before @), or "?".
+pub fn initials(name: &str) -> String {
+    let name = name.split('@').next().unwrap_or(name);
+    let letters: String = name
+        .split(|c: char| c.is_whitespace() || c == '.' || c == '_' || c == '-')
+        .filter_map(|w| w.chars().find(|c| c.is_alphanumeric()))
+        .take(2)
+        .flat_map(char::to_uppercase)
+        .collect();
+    if letters.is_empty() {
+        "?".into()
+    } else {
+        letters
+    }
+}
+
+/// A stable 64-bit hash (FNV-1a) for picking avatar colours.
+pub fn seed(s: &str) -> u64 {
+    s.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    })
 }
 
 /// Tasks tab: Pomodoro header + to-do list.
@@ -405,5 +472,30 @@ pub fn human_duration(secs: u64) -> String {
         format!("{} min", secs / 60)
     } else {
         format!("{secs} s")
+    }
+}
+
+#[cfg(test)]
+mod initials_tests {
+    use super::*;
+
+    #[test]
+    fn initials_handle_names_emoji_and_empty() {
+        assert_eq!(initials("Ann Lee"), "AL");
+        assert_eq!(initials("Jürgen"), "J");
+        assert_eq!(initials("😀 Bob"), "B");
+        assert_eq!(initials("bob@example.com"), "B");
+        assert_eq!(initials(""), "?");
+        assert_eq!(initials("   "), "?");
+    }
+
+    #[test]
+    fn seeds_are_stable_and_spread() {
+        assert_eq!(seed("ann@example.com"), seed("ann@example.com"));
+        let distinct: std::collections::HashSet<u64> = ["a", "b", "c", "d", "e", "f"]
+            .iter()
+            .map(|s| seed(s) % 8)
+            .collect();
+        assert!(distinct.len() >= 3, "{distinct:?}");
     }
 }
