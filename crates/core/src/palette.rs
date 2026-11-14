@@ -43,7 +43,7 @@ pub fn dominant_pair(rgba: &[u8], side: u32) -> Option<([u8; 3], [u8; 3])> {
             )
         })
         .collect();
-    ranked.sort_by(|a, b| b.0.cmp(&a.0));
+    ranked.sort_by_key(|e| std::cmp::Reverse(e.0));
     let first = ranked.first()?.1;
     let distance = |a: [u8; 3], b: [u8; 3]| -> i32 {
         a.iter()

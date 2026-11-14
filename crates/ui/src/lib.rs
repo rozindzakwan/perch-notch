@@ -9,6 +9,7 @@
 pub mod art;
 pub mod effects;
 pub mod form;
+pub mod glass;
 pub mod icons;
 pub mod mirror;
 pub mod render;

@@ -396,7 +396,7 @@ fn reversal_mid_open_is_continuous() {
     let size = |n: &Notch| n.visual((200, 32), (380, 300)).height as f32;
     n.handle(NotchEvent::HotZoneEntered);
     let mut last = size(&n);
-    let mut check = |n: &Notch, last: &mut f32| {
+    let check = |n: &Notch, last: &mut f32| {
         let now = size(n);
         assert!(
             (now - *last).abs() <= 0.15 * 300.0,
