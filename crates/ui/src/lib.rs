@@ -7,6 +7,7 @@
 //! their `unsafe` blocks and document each one.
 
 pub mod art;
+pub mod effects;
 pub mod form;
 pub mod icons;
 pub mod mirror;
