@@ -157,6 +157,7 @@ pub struct Model {
     media: MediaState,
     media_reported_at: Instant,
     cover: Option<(Arc<Vec<u8>>, u32)>,
+    accent: Option<([u8; 3], [u8; 3])>,
     lyrics: Option<(String, Lyrics)>,
 
     todos: TodoList,
@@ -192,6 +193,7 @@ impl Model {
             media: MediaState::new(),
             media_reported_at: now.instant,
             cover: None,
+            accent: None,
             lyrics: None,
             todos: TodoList::new(),
             shelf: Shelf::default(),
@@ -420,6 +422,7 @@ impl Model {
         if !self.is_active(Feature::Media) {
             self.media = MediaState::new();
             self.cover = None;
+            self.accent = None;
             self.lyrics = None;
         }
         if !self.is_active(Feature::Lyrics) {
@@ -668,9 +671,14 @@ impl Model {
         let mut fx = Vec::new();
         if let Some(cover) = new_cover {
             self.cover = cover.as_deref().and_then(decode_cover);
+            self.accent = self
+                .cover
+                .as_ref()
+                .and_then(|(px, side)| perch_core::palette::dominant_pair(px, *side));
         }
         if matches!(ev, MediaEvent::Gone) {
             self.cover = None;
+            self.accent = None;
             self.lyrics = None;
         }
         let after = self.media.track_token();
@@ -1185,6 +1193,16 @@ impl Model {
                 .filter(|t| !t.trim().is_empty()),
             _ => None,
         };
+        let next_lyric = match (&self.lyrics, pos) {
+            (Some((_, l)), Some(p)) => l.index_at(p).and_then(|i| {
+                l.lines()
+                    .iter()
+                    .skip(i + 1)
+                    .find(|line| !line.is_blank())
+                    .map(|line| line.text.clone())
+            }),
+            _ => None,
+        };
         MediaView {
             title: track
                 .map(|t| t.title.clone())
@@ -1197,6 +1215,8 @@ impl Model {
             times,
             lyric,
             cover: self.cover.clone(),
+            accent: self.accent,
+            next_lyric,
         }
     }
 

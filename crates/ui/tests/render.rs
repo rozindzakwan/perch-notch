@@ -38,6 +38,8 @@ fn bodies() -> Vec<Body> {
             times: Some(("1:00".into(), "2:30".into())),
             lyric: Some("la la la".into()),
             cover: Some((Arc::new(vec![200u8; 16 * 16 * 4]), 16)),
+            accent: None,
+            next_lyric: None,
         }),
         Body::Tasks(TasksView {
             pomodoro: Some(PomodoroView {

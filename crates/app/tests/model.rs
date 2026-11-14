@@ -655,3 +655,41 @@ mod mail {
         );
     }
 }
+
+#[test]
+fn cover_change_computes_accent_once_and_lyrics_expose_the_next_line() {
+    let now = t0();
+    let mut m = Model::new(config_all(), now);
+    let mut img = image::RgbaImage::new(32, 32);
+    for (x, _, p) in img.enumerate_pixels_mut() {
+        *p = if x < 16 {
+            image::Rgba([0xFF, 0x7A, 0x59, 255])
+        } else {
+            image::Rgba([0xC4, 0x31, 0x7A, 255])
+        };
+    }
+    let mut png = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap_or_else(|e| panic!("{e}"));
+    let mut t = track("Song", 200, true);
+    t.cover = Some(png);
+    let fx = m.handle_event(&PlatformEvent::Media(MediaEvent::TrackChanged(t)), now);
+    let key = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::FetchLyrics(r) => Some(r.key.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    m.lyrics_loaded(
+        &key,
+        Some("[00:00.00]line one\n[00:10.00]line two\n[00:20.00]line three"),
+    );
+    m.action(Action::SelectTab(Tab::Media), now);
+    let Body::Media(v) = m.view(now).body else {
+        panic!("media tab")
+    };
+    assert!(v.accent.is_some(), "accent from the cover");
+    assert_eq!(v.lyric.as_deref(), Some("line one"));
+    assert_eq!(v.next_lyric.as_deref(), Some("line two"));
+}

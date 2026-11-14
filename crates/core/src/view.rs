@@ -148,6 +148,10 @@ pub struct MediaView {
     pub lyric: Option<String>,
     /// Cover art as straight RGBA8 plus side length.
     pub cover: Option<(std::sync::Arc<Vec<u8>>, u32)>,
+    /// Two dominant colours of the cover (for the glow), if it has any.
+    pub accent: Option<([u8; 3], [u8; 3])>,
+    /// The lyric line after the current one.
+    pub next_lyric: Option<String>,
 }
 
 /// One row in a list.

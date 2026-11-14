@@ -16,6 +16,7 @@ pub mod mail;
 pub mod media;
 pub mod noise;
 pub mod notch;
+pub mod palette;
 pub mod platform;
 pub mod pomodoro;
 pub mod reminders;
