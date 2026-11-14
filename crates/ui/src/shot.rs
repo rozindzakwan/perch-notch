@@ -20,7 +20,10 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId, WindowLevel};
 
 use crate::art;
+use crate::icons::Icon;
 use crate::text::TextRenderer;
+use crate::theme::{Gradient, Palette};
+use crate::tokens::Weight;
 
 /// Annotation tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +90,8 @@ pub struct ShotState {
     drawing: Option<Mark>,
     typing: Option<((f32, f32), String)>,
     buttons: Vec<(f32, f32, f32, f32, Button)>,
+    toolbar: Option<(f32, f32, f32, f32)>,
+    hover: Option<(f32, f32)>,
 }
 
 fn paint(c: (u8, u8, u8), a: u8) -> Paint<'static> {
@@ -118,6 +123,8 @@ impl ShotState {
             drawing: None,
             typing: None,
             buttons: Vec::new(),
+            toolbar: None,
+            hover: None,
         })
     }
 
@@ -402,102 +409,268 @@ impl ShotState {
         self.paint_toolbar(pm, text);
     }
 
+    /// The toolbar's outline from the last paint (capture pixels).
+    pub fn toolbar_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        self.toolbar
+    }
+
+    /// The toolbar buttons from the last paint, with stable names:
+    /// `pen`, `arrow`, `text`, `ocr`, `copy`, `save`, `cancel`.
+    pub fn toolbar_buttons(&self) -> Vec<ToolbarButton> {
+        self.buttons
+            .iter()
+            .map(|(x, y, w, h, b)| ((*x, *y, *w, *h), button_name(*b)))
+            .collect()
+    }
+
+    /// The cursor moved without a button held. Returns true when the hovered
+    /// toolbar button changed (a repaint shows its label).
+    pub fn hover(&mut self, x: f32, y: f32) -> bool {
+        let before = self.hover.and_then(|(hx, hy)| self.button_at(hx, hy));
+        self.hover = Some((x, y));
+        before != self.button_at(x, y)
+    }
+
     fn paint_toolbar(&mut self, pm: &mut Pixmap, text: &mut TextRenderer) {
         let Some((sx, sy, sw, sh)) = self.sel else {
             return;
         };
-        let items: [(&str, Button); 7] = [
-            ("Pen", Button::Tool(Tool::Pen)),
-            ("Arrow", Button::Tool(Tool::Arrow)),
-            ("Text", Button::Tool(Tool::Text)),
-            ("Copy text", Button::Ocr),
-            ("Copy", Button::Copy),
-            ("Save", Button::Save),
-            ("Cancel", Button::Cancel),
+        // Groups: drawing tools | outputs | cancel.
+        let groups: [&[Button]; 3] = [
+            &[
+                Button::Tool(Tool::Pen),
+                Button::Tool(Tool::Arrow),
+                Button::Tool(Tool::Text),
+            ],
+            &[Button::Ocr, Button::Copy, Button::Save],
+            &[Button::Cancel],
         ];
-        let px = 14.0;
-        let pad = 12.0;
-        let bh = 30.0;
-        let widths: Vec<f32> = items
-            .iter()
-            .map(|(l, _)| text.measure(l, px).width + 2.0 * pad)
-            .collect();
-        let total: f32 = widths.iter().sum::<f32>() + 6.0 * (items.len() as f32 - 1.0) + 12.0;
+        let (b, gap, pad, sep) = (TB_BUTTON, 4.0, 6.0, 13.0);
+        let count: usize = groups.iter().map(|g| g.len()).sum();
+        let total = 2.0 * pad
+            + count as f32 * b
+            + (count - groups.len()) as f32 * gap
+            + (groups.len() - 1) as f32 * sep;
+        let th = b + 2.0 * pad;
         let (pw, ph) = (pm.width() as f32, pm.height() as f32);
-        let mut x = (sx + sw - total).clamp(4.0, (pw - total - 4.0).max(4.0));
-        let y = if sy + sh + bh + 16.0 < ph {
-            sy + sh + 8.0
-        } else if sy - bh - 16.0 > 0.0 {
-            sy - bh - 14.0
+        let x0 = (sx + sw - total).clamp(4.0, (pw - total - 4.0).max(4.0));
+        let y0 = if sy + sh + th + 16.0 < ph {
+            sy + sh + 10.0
+        } else if sy - th - 16.0 > 0.0 {
+            sy - th - 10.0
         } else {
-            sy + sh - bh - 14.0
+            sy + sh - th - 12.0
         };
-        if let Some(p) = art::rounded_rect(x, y - 3.0, total, bh + 6.0, 10.0) {
-            pm.fill_path(
-                &p,
-                &paint((22, 23, 28), 240),
-                FillRule::Winding,
-                Transform::identity(),
-                None,
-            );
-        }
-        x += 6.0;
-        for ((label, b), w) in items.iter().zip(widths) {
-            let active = *b == Button::Tool(self.tool);
-            if active {
-                if let Some(p) = art::rounded_rect(x, y, w, bh, 7.0) {
-                    pm.fill_path(
-                        &p,
-                        &paint(ACCENT, 255),
-                        FillRule::Winding,
-                        Transform::identity(),
-                        None,
-                    );
-                }
+        let pal = Palette::dark(false);
+        glass_pill(pm, (x0, y0, total, th), &pal);
+        self.toolbar = Some((x0, y0, total, th));
+        let hovered = self.hover;
+        let mut x = x0 + pad;
+        let y = y0 + pad;
+        let mut label: Option<(f32, &'static str)> = None;
+        for (gi, group) in groups.iter().enumerate() {
+            if gi > 0 {
+                let lx = x - gap + (sep + gap) / 2.0 - 0.5;
+                fill_rect(pm, lx, y + 7.0, 1.0, b - 14.0, pal.border);
+                x += sep - gap;
             }
-            let color = if active {
-                Color::from_rgba8(22, 23, 28, 255)
+            for btn in group.iter() {
+                let active = *btn == Button::Tool(self.tool);
+                let hot =
+                    hovered.is_some_and(|(hx, hy)| hx >= x && hy >= y && hx < x + b && hy < y + b);
+                if active {
+                    if let Some(p) = PathBuilder::from_circle(x + b / 2.0, y + b / 2.0, b / 2.0) {
+                        fill_gradient(pm, &p, pal.accent, x, x + b);
+                    }
+                } else if hot {
+                    if let Some(p) = PathBuilder::from_circle(x + b / 2.0, y + b / 2.0, b / 2.0) {
+                        pm.fill_path(
+                            &p,
+                            &solid(pal.raised[1]),
+                            FillRule::Winding,
+                            Transform::identity(),
+                            None,
+                        );
+                    }
+                }
+                if hot {
+                    label = Some((x + b / 2.0, button_label(*btn)));
+                }
+                let icon = TB_ICON;
+                let color = if *btn == Button::Cancel && !hot {
+                    pal.muted
+                } else {
+                    pal.fg
+                };
+                crate::icons::draw(
+                    pm,
+                    button_icon(*btn),
+                    x + (b - icon) / 2.0,
+                    y + (b - icon) / 2.0,
+                    icon,
+                    color,
+                );
+                self.buttons.push((x, y, b, b, *btn));
+                x += b + gap;
+            }
+        }
+        // The hovered button's name, in a small pill above (or below) the bar.
+        if let Some((cx, name)) = label {
+            let px = 13.0;
+            let m = text.measure_w(name, px, Weight::Medium);
+            let (lw, lh) = (m.width + 20.0, 26.0);
+            let lx = (cx - lw / 2.0).clamp(4.0, (pw - lw - 4.0).max(4.0));
+            let ly = if y0 - lh - 6.0 > 0.0 {
+                y0 - lh - 6.0
             } else {
-                Color::from_rgba8(242, 243, 247, 255)
+                y0 + th + 6.0
             };
-            let m = text.measure(label, px);
-            text.draw(
+            glass_pill(pm, (lx, ly, lw, lh), &pal);
+            text.draw_w(
                 pm,
-                label,
-                x + pad,
-                y + (bh + m.ascent - m.descent) / 2.0,
+                name,
+                lx + 10.0,
+                ly + (lh + m.ascent - m.descent) / 2.0,
                 px,
-                color,
-                w,
+                pal.fg,
+                lw,
+                Weight::Medium,
             );
-            self.buttons.push((x, y, w, bh, *b));
-            x += w + 6.0;
         }
     }
 }
 
-fn hint(pm: &mut Pixmap, text: &mut TextRenderer, s: &str) {
-    let px = 16.0;
-    let m = text.measure(s, px);
-    let w = m.width + 32.0;
-    let x = (pm.width() as f32 - w) / 2.0;
-    if let Some(p) = art::rounded_rect(x, 24.0, w, 36.0, 12.0) {
+/// A toolbar button: its rect `(x, y, w, h)` and stable name.
+pub type ToolbarButton = ((f32, f32, f32, f32), &'static str);
+
+/// Toolbar button side and icon size (capture pixels).
+const TB_BUTTON: f32 = 34.0;
+const TB_ICON: f32 = 18.0;
+
+fn button_name(b: Button) -> &'static str {
+    match b {
+        Button::Tool(Tool::Pen) => "pen",
+        Button::Tool(Tool::Arrow) => "arrow",
+        Button::Tool(Tool::Text) => "text",
+        Button::Ocr => "ocr",
+        Button::Copy => "copy",
+        Button::Save => "save",
+        Button::Cancel => "cancel",
+    }
+}
+
+fn button_label(b: Button) -> &'static str {
+    match b {
+        Button::Tool(Tool::Pen) => "Pen",
+        Button::Tool(Tool::Arrow) => "Arrow",
+        Button::Tool(Tool::Text) => "Text",
+        Button::Ocr => "Copy text (OCR)",
+        Button::Copy => "Copy image",
+        Button::Save => "Save",
+        Button::Cancel => "Cancel",
+    }
+}
+
+fn button_icon(b: Button) -> Icon {
+    match b {
+        Button::Tool(Tool::Pen) => Icon::Pen,
+        Button::Tool(Tool::Arrow) => Icon::Arrow,
+        Button::Tool(Tool::Text) => Icon::Type,
+        Button::Ocr => Icon::Ocr,
+        Button::Copy => Icon::Clipboard,
+        Button::Save => Icon::Save,
+        Button::Cancel => Icon::Close,
+    }
+}
+
+fn solid(c: Color) -> Paint<'static> {
+    let mut p = Paint {
+        anti_alias: true,
+        ..Default::default()
+    };
+    p.set_color(c);
+    p
+}
+
+fn fill_rect(pm: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, c: Color) {
+    if let Some(r) = Rect::from_xywh(x, y, w, h) {
+        pm.fill_rect(r, &solid(c), Transform::identity(), None);
+    }
+}
+
+fn fill_gradient(pm: &mut Pixmap, path: &tiny_skia::Path, g: Gradient, x0: f32, x1: f32) {
+    let shader = tiny_skia::LinearGradient::new(
+        tiny_skia::Point::from_xy(x0, 0.0),
+        tiny_skia::Point::from_xy(x1, 0.0),
+        vec![
+            tiny_skia::GradientStop::new(0.0, g.from),
+            tiny_skia::GradientStop::new(1.0, g.to),
+        ],
+        tiny_skia::SpreadMode::Pad,
+        Transform::identity(),
+    );
+    let paint = match shader {
+        Some(shader) => Paint {
+            shader,
+            anti_alias: true,
+            ..Default::default()
+        },
+        None => solid(g.from),
+    };
+    pm.fill_path(path, &paint, FillRule::Winding, Transform::identity(), None);
+}
+
+/// A dark glass pill: the palette surface, a hairline border and a top
+/// highlight, over a soft drop shadow.
+fn glass_pill(pm: &mut Pixmap, (x, y, w, h): (f32, f32, f32, f32), pal: &Palette) {
+    let r = h / 2.0;
+    // Shadow rings drawn entirely outside the shape, so the translucent fill
+    // shows the capture rather than the shadow.
+    for (grow, a) in [(8.0, 0.06), (4.0, 0.10), (2.0, 0.14)] {
+        let half = grow / 2.0;
+        if let Some(p) = art::rounded_rect(x - half, y - half, w + grow, h + grow, r + half) {
+            let st = Stroke {
+                width: grow,
+                ..Default::default()
+            };
+            let c = Color::from_rgba(0.0, 0.0, 0.0, a).unwrap_or(Color::TRANSPARENT);
+            pm.stroke_path(&p, &solid(c), &st, Transform::identity(), None);
+        }
+    }
+    if let Some(p) = art::rounded_rect(x, y, w, h, r) {
         pm.fill_path(
             &p,
-            &paint((22, 23, 28), 230),
+            &solid(pal.surface),
             FillRule::Winding,
             Transform::identity(),
             None,
         );
     }
-    text.draw(
+    if let Some(p) = art::rounded_rect(x + 0.5, y + 0.5, w - 1.0, h - 1.0, r - 0.5) {
+        let st = Stroke {
+            width: 1.0,
+            ..Default::default()
+        };
+        pm.stroke_path(&p, &solid(pal.border), &st, Transform::identity(), None);
+    }
+}
+
+fn hint(pm: &mut Pixmap, text: &mut TextRenderer, s: &str) {
+    let pal = Palette::dark(false);
+    let px = 15.0;
+    let m = text.measure_w(s, px, Weight::Medium);
+    let (w, h) = (m.width + 36.0, 38.0);
+    let x = (pm.width() as f32 - w) / 2.0;
+    glass_pill(pm, (x, 24.0, w, h), &pal);
+    text.draw_w(
         pm,
         s,
-        x + 16.0,
-        24.0 + (36.0 + m.ascent - m.descent) / 2.0,
+        x + 18.0,
+        24.0 + (h + m.ascent - m.descent) / 2.0,
         px,
-        Color::from_rgba8(242, 243, 247, 255),
+        pal.fg,
         w,
+        Weight::Medium,
     );
 }
 
@@ -622,6 +795,9 @@ impl ShotWindow {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x as f32, position.y as f32);
                 if !self.pressed {
+                    if self.state.hover(self.cursor.0, self.cursor.1) {
+                        self.window.request_redraw();
+                    }
                     return Vec::new();
                 }
                 self.state.drag(self.cursor.0, self.cursor.1);

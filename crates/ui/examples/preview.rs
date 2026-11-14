@@ -331,6 +331,42 @@ fn main() {
             }
         }
     }
+    // The screenshot overlay with a selection, the toolbar and a hover label.
+    {
+        let (cw, ch) = (720u32, 360u32);
+        let mut rgba = Vec::with_capacity((cw * ch * 4) as usize);
+        for y in 0..ch {
+            for x in 0..cw {
+                let t = x as f32 / cw as f32;
+                let u = y as f32 / ch as f32;
+                rgba.extend_from_slice(&[
+                    (90.0 + 120.0 * t) as u8,
+                    (110.0 + 60.0 * u) as u8,
+                    (170.0 - 60.0 * t) as u8,
+                    255,
+                ]);
+            }
+        }
+        if let (Some(mut s), Some(mut pm), Ok(mut text)) = (
+            perch_ui::shot::ShotState::new(&rgba, cw, ch),
+            Pixmap::new(cw, ch),
+            perch_ui::text::TextRenderer::new(),
+        ) {
+            s.press(120.0, 60.0);
+            s.drag(560.0, 250.0);
+            s.release(560.0, 250.0);
+            s.paint(&mut pm, &mut text);
+            if let Some(((x, y, w, h), _)) = s.toolbar_buttons().into_iter().nth(3) {
+                s.hover(x + w / 2.0, y + h / 2.0);
+            }
+            s.paint(&mut pm, &mut text);
+            let path = out.join("shot.png");
+            match pm.save_png(&path) {
+                Ok(()) => println!("{}", path.display()),
+                Err(e) => eprintln!("{}: {e}", path.display()),
+            }
+        }
+    }
     // Panels with a shadow margin, as the app draws them.
     let m = 12.0 * scale;
     let (lw, lh) = (380.0 * scale, 300.0 * scale);

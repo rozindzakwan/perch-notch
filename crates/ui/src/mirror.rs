@@ -1,7 +1,8 @@
 //! Camera mirror window: a small, borderless, always-on-top window under the
 //! notch that shows the latest camera frame, flipped horizontally like a
-//! mirror. Frames are pushed by the capture thread into a shared slot; the
-//! window only paints when told a new frame arrived. Click or Esc closes it.
+//! mirror, inside a rounded frame. Frames are pushed by the capture thread
+//! into a shared slot; the window only paints when told a new frame arrived.
+//! Click or Esc closes it.
 
 use std::num::NonZeroU32;
 use std::rc::Rc;
@@ -44,6 +45,80 @@ pub fn mirror_fill(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u32> {
     out
 }
 
+/// [`mirror_fill`] inside a rounded frame: premultiplied `0xAARRGGBB` with
+/// transparent corners (radius in pixels) and a faint hairline edge, for a
+/// transparent window. With no frame yet (`src` empty) the frame is a dark
+/// glass fill. Pure.
+pub fn mirror_frame(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32, radius: f32) -> Vec<u32> {
+    let n = (dw * dh) as usize;
+    let Some(mut pm) = tiny_skia::Pixmap::new(dw.max(1), dh.max(1)) else {
+        return vec![0; n];
+    };
+    let has_frame = sw > 0 && sh > 0 && src.len() >= (sw * sh * 3) as usize;
+    let mut content = vec![0u32; n];
+    if has_frame {
+        content = mirror_fill(src, sw, sh, dw, dh);
+    }
+    let Some(path) = crate::art::rounded_rect(0.0, 0.0, dw as f32, dh as f32, radius) else {
+        return vec![0; n];
+    };
+    // Coverage mask of the rounded shape.
+    let mut paint = tiny_skia::Paint {
+        anti_alias: true,
+        ..Default::default()
+    };
+    paint.set_color(tiny_skia::Color::WHITE);
+    pm.fill_path(
+        &path,
+        &paint,
+        tiny_skia::FillRule::Winding,
+        tiny_skia::Transform::identity(),
+        None,
+    );
+    let empty = 0x0012_141C;
+    let mut out: Vec<u32> = pm
+        .pixels()
+        .iter()
+        .zip(content.iter())
+        .map(|(cov, px)| {
+            let a = u32::from(cov.alpha());
+            let px = if has_frame { *px } else { empty };
+            let ch = |shift: u32| (((px >> shift) & 0xFF) * a / 255) << shift;
+            (a << 24) | ch(16) | ch(8) | ch(0)
+        })
+        .collect();
+    // Hairline: blend white at 16 % along the inside edge.
+    pm.fill(tiny_skia::Color::TRANSPARENT);
+    if let Some(edge) =
+        crate::art::rounded_rect(0.5, 0.5, dw as f32 - 1.0, dh as f32 - 1.0, radius - 0.5)
+    {
+        let stroke = tiny_skia::Stroke {
+            width: 1.0,
+            ..Default::default()
+        };
+        pm.stroke_path(
+            &edge,
+            &paint,
+            &stroke,
+            tiny_skia::Transform::identity(),
+            None,
+        );
+        for (o, e) in out.iter_mut().zip(pm.pixels()) {
+            let k = u32::from(e.alpha()) * 41 / 255; // 0.16 of the coverage
+            if k == 0 || *o >> 24 == 0 {
+                continue;
+            }
+            let a = *o >> 24;
+            let ch = |shift: u32| {
+                let c = (*o >> shift) & 0xFF;
+                ((c * (255 - k) + a * k) / 255) << shift
+            };
+            *o = (a << 24) | ch(16) | ch(8) | ch(0);
+        }
+    }
+    out
+}
+
 /// The mirror window.
 pub struct MirrorWindow {
     window: Rc<Window>,
@@ -64,6 +139,7 @@ impl MirrorWindow {
         let attrs = Window::default_attributes()
             .with_title("Perch mirror")
             .with_decorations(false)
+            .with_transparent(true)
             .with_resizable(false)
             .with_window_level(WindowLevel::AlwaysOnTop)
             .with_position(PhysicalPosition::new(x, y))
@@ -120,9 +196,10 @@ impl MirrorWindow {
             return;
         };
         let frame = self.slot.lock().ok().and_then(|f| f.clone());
+        let radius = crate::tokens::radius::COVER * self.window.scale_factor() as f32;
         let pixels = match frame {
-            Some((rgb, w, h)) => mirror_fill(&rgb, w, h, size.width, size.height),
-            None => vec![0x0016_171c; (size.width * size.height) as usize],
+            Some((rgb, w, h)) => mirror_frame(&rgb, w, h, size.width, size.height, radius),
+            None => mirror_frame(&[], 0, 0, size.width, size.height, radius),
         };
         if self.surface.resize(nw, nh).is_err() {
             return;

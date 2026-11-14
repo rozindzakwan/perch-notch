@@ -150,3 +150,77 @@ fn mirror_flips_horizontally_and_crops_to_fill() {
         "no frame paints black"
     );
 }
+
+/// A 600x300 capture, all red, with the whole screen selected and painted.
+fn annotating() -> (ShotState, tiny_skia::Pixmap) {
+    let rgba: Vec<u8> = [255u8, 0, 0, 255].repeat(600 * 300);
+    let mut s = ShotState::new(&rgba, 600, 300).unwrap_or_else(|| panic!("state"));
+    s.press(10.0, 10.0);
+    s.release(10.0, 10.0);
+    let mut text = perch_ui::text::TextRenderer::new().unwrap_or_else(|e| panic!("{e}"));
+    let mut pm = tiny_skia::Pixmap::new(600, 300).unwrap_or_else(|| panic!());
+    s.paint(&mut pm, &mut text);
+    (s, pm)
+}
+
+#[test]
+fn toolbar_is_a_glass_pill_with_icon_buttons() {
+    let (mut s, pm) = annotating();
+    let (tx, ty, tw, th) = s.toolbar_rect().unwrap_or_else(|| panic!("a toolbar"));
+    let buttons = s.toolbar_buttons();
+    let names: Vec<&str> = buttons.iter().map(|b| b.1).collect();
+    assert_eq!(
+        names,
+        ["pen", "arrow", "text", "ocr", "copy", "save", "cancel"]
+    );
+    for ((bx, by, bw, bh), name) in &buttons {
+        assert!((bw - bh).abs() < 0.5, "{name} is a square icon button");
+        assert!(*bx >= tx && bx + bw <= tx + tw && *by >= ty && by + bh <= ty + th);
+    }
+    // Glass fill: the dark palette surface over the capture (the toolbar sits
+    // inside a full-screen selection, which is not dimmed).
+    let pal = perch_ui::theme::Palette::dark(false);
+    let a = pal.surface.alpha();
+    let want = pal.surface.red() * 255.0 * a + 255.0 * (1.0 - a);
+    let p = pm
+        .pixel((tx + 4.0) as u32, (ty + th / 2.0) as u32)
+        .unwrap_or_else(|| panic!());
+    assert!(
+        (f32::from(p.red()) - want).abs() < 8.0,
+        "toolbar red {} vs {want}",
+        p.red()
+    );
+    // The buttons keep their actions.
+    let centre = |name: &str| {
+        let ((x, y, w, h), _) = *buttons
+            .iter()
+            .find(|b| b.1 == name)
+            .unwrap_or_else(|| panic!("{name}"));
+        (x + w / 2.0, y + h / 2.0)
+    };
+    let (x, y) = centre("text");
+    s.press(x, y);
+    s.release(x, y);
+    assert_eq!(s.tool(), Tool::Text);
+    let (x, y) = centre("cancel");
+    assert_eq!(s.press(x, y), vec![ShotEvent::Cancel]);
+    let (x, y) = centre("copy");
+    assert!(matches!(
+        s.press(x, y).as_slice(),
+        [ShotEvent::Copy(_, 600, 300)]
+    ));
+}
+
+#[test]
+fn mirror_frame_has_rounded_corners() {
+    use perch_ui::mirror::mirror_frame;
+    let src = [200u8, 100, 50].repeat(64 * 48);
+    let out = mirror_frame(&src, 64, 48, 64, 48, 12.0);
+    assert_eq!(out.len(), 64 * 48);
+    assert_eq!(out[0] >> 24, 0, "top-left corner is transparent");
+    assert_eq!(out[63] >> 24, 0, "top-right corner is transparent");
+    assert_eq!(out[64 * 47] >> 24, 0, "bottom-left corner is transparent");
+    let centre = out[24 * 64 + 32];
+    assert_eq!(centre >> 24, 0xFF, "the middle is opaque");
+    assert_eq!(centre & 0x00FF_FFFF, 0x00C8_6432, "and shows the frame");
+}
