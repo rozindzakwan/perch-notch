@@ -335,7 +335,7 @@ impl FormState {
                     let sx = w - pad - sw;
                     let sy = oy + (row_h - sh) / 2.0;
                     let track = if *value && !*disabled {
-                        pal.accent
+                        pal.accent.from
                     } else {
                         with_alpha(pal.fg, 0.18)
                     };
@@ -441,7 +441,7 @@ impl FormState {
                     let bh = 30.0;
                     let focused = self.focus == Some(i);
                     let border = if focused {
-                        pal.accent
+                        pal.accent.from
                     } else {
                         with_alpha(pal.fg, 0.25)
                     };
@@ -485,7 +485,7 @@ impl FormState {
                                 (bh - 14.0) * s,
                             )
                             .map(tiny_skia::PathBuilder::from_rect),
-                            pal.accent,
+                            pal.accent.from,
                         );
                     }
                     self.regions
@@ -500,7 +500,7 @@ impl FormState {
                         let lw = text.measure(label, 13.0 * s).width / s + 28.0;
                         bx -= lw;
                         let bg = if n == 0 {
-                            pal.accent
+                            pal.accent.from
                         } else {
                             with_alpha(pal.fg, 0.12)
                         };

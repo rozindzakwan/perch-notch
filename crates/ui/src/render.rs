@@ -227,7 +227,7 @@ fn draw_collapsed(p: &mut Painter<'_>, collapsed: &CollapsedView, w: f32, h: f32
     let pad = 10.0 * s;
     let icon = (h - 2.0 * pad).clamp(8.0 * s, 22.0 * s);
     let fg = p.pal.fg;
-    let accent = p.pal.accent;
+    let accent = p.pal.accent.from;
     p.fill(art::mascot(pad, (h - icon) / 2.0, icon), fg);
     p.fill(art::mascot_eye(pad, (h - icon) / 2.0, icon), accent);
 
@@ -285,7 +285,7 @@ fn draw_expanded(p: &mut Painter<'_>, view: &PanelView, w: f32, h: f32) {
     p.button(gx, top, strip_h, strip_h, Action::OpenSettings);
     let pin_x = gx - strip_h - 6.0 * s;
     let pin_color = if view.pinned {
-        p.pal.accent
+        p.pal.accent.from
     } else {
         p.pal.muted
     };
@@ -381,7 +381,7 @@ fn draw_media(p: &mut Painter<'_>, m: &MediaView, x: f32, y: f32, w: f32, h: f32
     let sub_px = 12.0 * s;
     let fg = p.pal.fg;
     let muted = p.pal.muted;
-    let accent = p.pal.accent;
+    let accent = p.pal.accent.from;
     let mut ty = y;
     p.text_in(&m.title, tx, ty, 20.0 * s, title_px, fg, tw);
     ty += 20.0 * s;
@@ -480,7 +480,7 @@ fn draw_tasks(p: &mut Painter<'_>, t: &TasksView, x: f32, y: f32, w: f32, h: f32
     let mut cy = y;
     let fg = p.pal.fg;
     let muted = p.pal.muted;
-    let accent = p.pal.accent;
+    let accent = p.pal.accent.from;
     if let Some(pomo) = &t.pomodoro {
         // [play/pause] Focus 24:13   [skip] [reset]          Water in 12 min
         let icon = 14.0 * s;
@@ -571,7 +571,7 @@ fn draw_rows(p: &mut Painter<'_>, rows: &[Row], empty: &str, x: f32, y: f32, w: 
             let by = cy + (row_h - b) / 2.0;
             p.stroke(art::rounded_rect(tx, by, b, b, 3.0 * s), muted, 1.2 * s);
             if checked {
-                let accent = p.pal.accent;
+                let accent = p.pal.accent.from;
                 p.stroke(
                     art::check(tx + 2.0 * s, by + 2.0 * s, b - 4.0 * s),
                     accent,
@@ -642,7 +642,7 @@ fn draw_sliders(
             break;
         }
         let dot = 9.0 * s;
-        let accent = p.pal.accent;
+        let accent = p.pal.accent.from;
         let dot_color = if row.on {
             accent
         } else {
@@ -705,7 +705,7 @@ fn draw_usage(p: &mut Painter<'_>, total: &str, bars: &[UsageBar], x: f32, y: f3
     let s = p.s;
     let fg = p.pal.fg;
     let muted = p.pal.muted;
-    let accent = p.pal.accent;
+    let accent = p.pal.accent.from;
     p.text_in(total, x, y, 18.0 * s, 13.0 * s, fg, w);
     let mut cy = y + 22.0 * s;
     let row_h = 18.0 * s;

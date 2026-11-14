@@ -192,7 +192,7 @@ impl Shell {
     }
 
     fn palette(&self) -> Palette {
-        Palette::resolve(self.config().theme, true)
+        Palette::resolve(self.config().theme, true, false)
     }
 
     fn resolve_monitor(&mut self) -> Option<Monitor> {

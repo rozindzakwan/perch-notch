@@ -21,7 +21,7 @@ fn render(
 ) -> (Pixmap, Vec<perch_core::view::Hit>) {
     let mut r = Renderer::new().unwrap_or_else(|e| panic!("renderer: {e}"));
     let mut pm = Pixmap::new(w, h).unwrap_or_else(|| panic!("pixmap"));
-    let mut frame = Frame::new(w, h, scale, Palette::dark());
+    let mut frame = Frame::new(w, h, scale, Palette::dark(false));
     frame.progress = progress;
     let hits = r.draw(&mut pm, &frame, view);
     (pm, hits)
@@ -159,7 +159,7 @@ fn collapsed_pill_has_no_hits_and_degenerate_sizes_do_not_panic() {
 fn opaque_frames_have_no_translucent_body_pixels() {
     let mut r = Renderer::new().unwrap_or_else(|e| panic!("{e}"));
     let mut pm = Pixmap::new(200, 32).unwrap_or_else(|| panic!("pixmap"));
-    let mut frame = Frame::new(200, 32, 1.0, Palette::dark());
+    let mut frame = Frame::new(200, 32, 1.0, Palette::dark(false));
     frame.opaque = true;
     r.draw(&mut pm, &frame, &PanelView::default());
     let centre = pm.pixel(100, 16).unwrap_or_else(|| panic!("pixel"));

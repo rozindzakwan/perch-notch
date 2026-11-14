@@ -14,6 +14,7 @@ pub mod shell;
 pub mod shot;
 pub mod text;
 pub mod theme;
+pub mod tokens;
 
 pub use form::{Field, FormEvent, FormSpec, FormState, FormWindow};
 pub use render::{Collapsed, Frame, Renderer};
