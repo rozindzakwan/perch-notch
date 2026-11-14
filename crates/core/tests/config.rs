@@ -212,3 +212,34 @@ fn enabled_feature_count_is_zero_for_heavy_features_by_default() {
         "media is the headline feature, on by default"
     );
 }
+
+#[test]
+fn legacy_defaults_are_migrated() {
+    let dir = std::env::temp_dir().join(format!("perch-cfg-legacy-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("{e}"));
+    let path = dir.join("config.toml");
+    std::fs::write(
+        &path,
+        "[notch]\nexpanded_width = 480\nexpanded_height = 200\nanimation_ms = 180\n",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let (cfg, problem) = perch_core::config::ConfigStore::at(&path).load_or_default();
+    assert!(problem.is_none(), "{problem:?}");
+    assert_eq!(
+        (cfg.notch.expanded_width, cfg.notch.expanded_height),
+        (380, 300)
+    );
+    assert_eq!(cfg.notch.animation_ms, 320);
+    // A deliberate custom size is left alone.
+    std::fs::write(
+        &path,
+        "[notch]\nexpanded_width = 500\nexpanded_height = 260\n",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let (cfg, _) = perch_core::config::ConfigStore::at(&path).load_or_default();
+    assert_eq!(
+        (cfg.notch.expanded_width, cfg.notch.expanded_height),
+        (500, 260)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

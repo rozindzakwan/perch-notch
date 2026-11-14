@@ -7,6 +7,13 @@
 
 use std::time::Duration;
 
+use crate::anim::{ease_out, Spring};
+
+/// How long the content takes to fade in once the panel is 40 % open.
+const CONTENT_FADE: Duration = Duration::from_millis(140);
+/// Content starts to appear at this open-ness.
+const CONTENT_FROM: f32 = 0.4;
+
 /// Where the notch currently is in its open/close cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NotchState {
@@ -47,18 +54,31 @@ pub struct Visual {
     pub width: u32,
     /// Interpolated height in logical pixels.
     pub height: u32,
-    /// Eased open-ness, 0.0 = collapsed, 1.0 = expanded.
+    /// Open-ness, 0.0 = collapsed, 1.0 = expanded (briefly up to 1.04 while
+    /// the open spring overshoots).
     pub progress: f32,
     /// Whether to show the window at all.
     pub visible: bool,
+    /// Opacity of the panel content (fades in after 40 % open, hidden at
+    /// once when closing).
+    pub content_alpha: f32,
 }
 
 /// Hover-driven notch with time-based animation.
 #[derive(Debug)]
 pub struct Notch {
     state: NotchState,
-    /// Linear animation position, 0.0..=1.0.
-    t: f32,
+    /// Current open-ness.
+    p: f32,
+    /// Drives opening.
+    spring: Spring,
+    /// Open-ness when the current collapse started, and time since.
+    collapse_from: f32,
+    collapse_elapsed: Duration,
+    /// Content opacity.
+    content: f32,
+    /// OS asks for reduced motion: no springs or slides.
+    reduced: bool,
     expand_duration: Duration,
     collapse_duration: Duration,
     collapse_delay: Duration,
@@ -73,13 +93,19 @@ pub struct Notch {
 }
 
 impl Notch {
-    /// Create a notch with the given open animation duration and collapse delay.
-    pub fn new(animation: Duration, collapse_delay: Duration) -> Self {
+    /// Create a notch. `animation` is the open spring's settle time; closing
+    /// takes 56 % of it. `reduced_motion` makes every change instant.
+    pub fn new(animation: Duration, collapse_delay: Duration, reduced_motion: bool) -> Self {
         Self {
             state: NotchState::Collapsed,
-            t: 0.0,
+            p: 0.0,
+            spring: Spring::new(0.0),
+            collapse_from: 0.0,
+            collapse_elapsed: Duration::ZERO,
+            content: 0.0,
+            reduced: reduced_motion,
             expand_duration: animation,
-            collapse_duration: animation,
+            collapse_duration: animation.mul_f32(0.56),
             collapse_delay,
             pending_collapse: None,
             in_hot: false,
@@ -98,9 +124,18 @@ impl Notch {
         self.state
     }
 
-    /// Eased open-ness for the current frame.
+    /// Open-ness for the current frame.
     pub fn progress(&self) -> f32 {
-        ease_in_out(self.t)
+        self.p
+    }
+
+    /// Follow the OS reduced-motion setting from now on.
+    pub fn set_reduced_motion(&mut self, on: bool) {
+        self.reduced = on;
+    }
+
+    fn instant(&self, d: Duration) -> bool {
+        self.reduced || d.is_zero()
     }
 
     /// Whether the window should be shown at all.
@@ -116,7 +151,9 @@ impl Notch {
     /// True while a frame is actually needed; false when idle so the event loop
     /// can block instead of spinning.
     pub fn wants_animation(&self) -> bool {
-        self.is_visible() && matches!(self.state, NotchState::Expanding | NotchState::Collapsing)
+        self.is_visible()
+            && (matches!(self.state, NotchState::Expanding | NotchState::Collapsing)
+                || (self.state == NotchState::Expanded && self.content < 1.0))
     }
 
     /// How long until the next required wakeup, or `None` when fully idle.
@@ -144,6 +181,7 @@ impl Notch {
             height: lerp(collapsed.1, expanded.1),
             progress: p,
             visible: self.is_visible(),
+            content_alpha: self.content,
         }
     }
 
@@ -200,7 +238,9 @@ impl Notch {
                 if fs {
                     // Hidden: stop all animation work immediately.
                     self.state = NotchState::Collapsed;
-                    self.t = 0.0;
+                    self.p = 0.0;
+                    self.spring.snap(0.0);
+                    self.content = 0.0;
                     self.pending_collapse = None;
                 } else if self.inside() || self.pinned {
                     self.start_expanding();
@@ -232,13 +272,19 @@ impl Notch {
 
     fn start_expanding(&mut self) -> bool {
         match self.state {
-            NotchState::Expanded => false,
-            NotchState::Expanding => false,
+            NotchState::Expanded | NotchState::Expanding => false,
             _ => {
-                self.state = NotchState::Expanding;
-                if self.expand_duration.is_zero() {
-                    self.t = 1.0;
+                if self.instant(self.expand_duration) {
+                    self.p = 1.0;
+                    self.spring.snap(1.0);
+                    self.content = 1.0;
                     self.state = NotchState::Expanded;
+                } else {
+                    // Start from wherever we are, so reversing a collapse
+                    // never jumps.
+                    self.spring.snap(self.p);
+                    self.spring.set_target(1.0);
+                    self.state = NotchState::Expanding;
                 }
                 true
             }
@@ -247,16 +293,27 @@ impl Notch {
 
     fn start_collapsing(&mut self) -> bool {
         match self.state {
-            NotchState::Collapsed => false,
-            NotchState::Collapsing => false,
+            NotchState::Collapsed | NotchState::Collapsing => false,
             _ => {
-                self.state = NotchState::Collapsing;
-                if self.collapse_duration.is_zero() {
-                    self.t = 0.0;
+                self.content = 0.0;
+                if self.instant(self.collapse_duration) {
+                    self.p = 0.0;
+                    self.spring.snap(0.0);
                     self.state = NotchState::Collapsed;
+                } else {
+                    self.collapse_from = self.p;
+                    self.collapse_elapsed = Duration::ZERO;
+                    self.state = NotchState::Collapsing;
                 }
                 true
             }
+        }
+    }
+
+    fn fade_content(&mut self, dt: Duration) {
+        if self.p >= CONTENT_FROM {
+            let step = dt.as_secs_f32() / CONTENT_FADE.as_secs_f32();
+            self.content = (self.content + step).min(1.0);
         }
     }
 
@@ -287,42 +344,32 @@ impl Notch {
 
         match self.state {
             NotchState::Expanding => {
-                let step = ratio(dt, self.expand_duration);
-                self.t = (self.t + step).min(1.0);
-                if self.t >= 1.0 {
-                    self.t = 1.0;
+                let moving = self.spring.step(dt, self.expand_duration);
+                self.p = self.spring.value();
+                if !moving {
+                    self.p = 1.0;
                     self.state = NotchState::Expanded;
                 }
+                self.fade_content(dt);
+                true
+            }
+            NotchState::Expanded if self.content < 1.0 => {
+                self.fade_content(dt);
                 true
             }
             NotchState::Collapsing => {
-                let step = ratio(dt, self.collapse_duration);
-                self.t = (self.t - step).max(0.0);
-                if self.t <= 0.0 {
-                    self.t = 0.0;
+                self.collapse_elapsed += dt;
+                let t = self.collapse_elapsed.as_secs_f32() / self.collapse_duration.as_secs_f32();
+                if t >= 1.0 {
+                    self.p = 0.0;
+                    self.spring.snap(0.0);
                     self.state = NotchState::Collapsed;
+                } else {
+                    self.p = self.collapse_from * (1.0 - ease_out(t));
                 }
                 true
             }
             _ => false,
         }
-    }
-}
-
-fn ratio(dt: Duration, total: Duration) -> f32 {
-    if total.is_zero() {
-        return 1.0;
-    }
-    (dt.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0)
-}
-
-/// Cubic ease-in-out, the standard "feels right" curve for this kind of UI.
-fn ease_in_out(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    if t < 0.5 {
-        4.0 * t * t * t
-    } else {
-        let f = -2.0 * t + 2.0;
-        1.0 - f * f * f / 2.0
     }
 }

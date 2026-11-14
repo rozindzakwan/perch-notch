@@ -65,10 +65,10 @@ impl Default for NotchConfig {
             monitor: None,
             collapsed_width: 200,
             collapsed_height: 32,
-            expanded_width: 480,
-            expanded_height: 200,
+            expanded_width: 380,
+            expanded_height: 300,
             margin: 12,
-            animation_ms: 180,
+            animation_ms: 320,
             hot_zone_thickness: 2,
             hot_zone_padding: 40,
             collapse_delay_ms: 220,
@@ -447,6 +447,19 @@ pub struct Config {
 }
 
 impl Config {
+    /// Settings files store the whole config, so old files carry the old
+    /// defaults verbatim. Exactly those values mean "default" and move to
+    /// the Glass defaults; anything else is a deliberate choice and stays.
+    pub fn migrate_legacy(&mut self) {
+        if (self.notch.expanded_width, self.notch.expanded_height) == (480, 200) {
+            self.notch.expanded_width = 380;
+            self.notch.expanded_height = 300;
+        }
+        if self.notch.animation_ms == 180 {
+            self.notch.animation_ms = 320;
+        }
+    }
+
     /// Clamp every sub-section into safe ranges.
     pub fn clamp(&mut self) {
         self.notch.clamp();
@@ -518,7 +531,8 @@ impl ConfigStore {
     /// Load, but never fail: on any problem return defaults plus a description.
     pub fn load_or_default(&self) -> (Config, Option<String>) {
         match self.load() {
-            Ok(cfg) => {
+            Ok(mut cfg) => {
+                cfg.migrate_legacy();
                 // A valid file can still contain an unknown position spelling,
                 // which `de_position` silently defaulted. Report that so the UI
                 // can warn, by re-reading the raw value.

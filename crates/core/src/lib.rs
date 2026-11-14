@@ -6,6 +6,7 @@
 //! in `perch-platform-windows` / `perch-platform-linux`, plus a fake
 //! implementation here used by tests.
 
+pub mod anim;
 pub mod clipboard;
 pub mod config;
 pub mod error;

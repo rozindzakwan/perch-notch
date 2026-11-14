@@ -134,6 +134,7 @@ impl Shell {
         let notch = Notch::new(
             Duration::from_millis(u64::from(config.notch.animation_ms)),
             Duration::from_millis(u64::from(config.notch.collapse_delay_ms)),
+            false,
         );
         let mut model = Model::new(config, now);
         let data_dir = persist::data_dir();
@@ -426,6 +427,7 @@ impl Shell {
             self.notch = Notch::new(
                 Duration::from_millis(u64::from(cfg.notch.animation_ms)),
                 Duration::from_millis(u64::from(cfg.notch.collapse_delay_ms)),
+                false,
             );
         }
         if old.notch.hide_on_fullscreen != cfg.notch.hide_on_fullscreen && self.fullscreen {
