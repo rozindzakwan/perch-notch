@@ -60,6 +60,11 @@ pub fn tabs(
 
 /// Draw a row's leading element at `(x, y)` in a `d`-sized square; returns
 /// the width used (0 for none).
+/// Public alias of [`leading`] for screens drawing their own rows.
+pub fn leading_at(ctx: &mut Ctx<'_>, lead: &Leading, x: f32, y: f32, d: f32) -> f32 {
+    leading(ctx, lead, x, y, d)
+}
+
 pub(crate) fn leading(ctx: &mut Ctx<'_>, lead: &Leading, x: f32, y: f32, d: f32) -> f32 {
     match lead {
         Leading::None => 0.0,
@@ -78,6 +83,23 @@ pub(crate) fn leading(ctx: &mut Ctx<'_>, lead: &Leading, x: f32, y: f32, d: f32)
             }
             let s = d * 0.55;
             ctx.icon(*icon, x + (d - s) / 2.0, y + (d - s) / 2.0, s, ctx.pal.fg);
+            d
+        }
+        Leading::Disc { initials, color } => {
+            let r = d / 2.0;
+            let (cx, cy) = (x + r, y + r);
+            ctx.fill(circle(cx, cy, r), *color);
+            let px = (d * 0.38) / ctx.s;
+            let tw = ctx.measure(initials, (px, Weight::Bold));
+            ctx.text(
+                initials,
+                cx - tw / 2.0,
+                cy - r,
+                d,
+                (px, Weight::Bold),
+                Color::WHITE,
+                d,
+            );
             d
         }
         Leading::Check(done) => {

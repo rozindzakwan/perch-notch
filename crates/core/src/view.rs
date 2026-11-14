@@ -210,6 +210,8 @@ pub enum RowKind {
     Folder,
     /// Something needs attention.
     Warning,
+    /// An ambient sound.
+    Sound,
 }
 
 /// What sits at the start of a row.
@@ -227,6 +229,13 @@ pub enum RowLeading {
     },
     /// A kind icon.
     Kind(RowKind),
+    /// Initials on a solid disc in a known colour (app brand colours).
+    Disc {
+        /// One or two letters.
+        initials: String,
+        /// Disc colour.
+        rgb: [u8; 3],
+    },
     /// A small image (straight RGBA8, square side).
     Thumb(std::sync::Arc<Vec<u8>>, u32),
 }
@@ -269,6 +278,25 @@ pub fn initials(name: &str) -> String {
     } else {
         letters
     }
+}
+
+/// Brand colours of common apps, for the mixer's discs (`None` = use a
+/// hashed gradient).
+pub fn app_colour(name: &str) -> Option<[u8; 3]> {
+    let n = name.to_ascii_lowercase();
+    let table: [(&str, [u8; 3]); 10] = [
+        ("spotify", [0x1D, 0xB9, 0x54]),
+        ("chrome", [0x42, 0x85, 0xF4]),
+        ("firefox", [0xFF, 0x71, 0x39]),
+        ("discord", [0x58, 0x65, 0xF2]),
+        ("edge", [0x00, 0x78, 0xD7]),
+        ("vlc", [0xFF, 0x88, 0x00]),
+        ("teams", [0x62, 0x64, 0xA7]),
+        ("zoom", [0x2D, 0x8C, 0xFF]),
+        ("slack", [0x4A, 0x15, 0x4B]),
+        ("steam", [0x1B, 0x28, 0x38]),
+    ];
+    table.iter().find(|(k, _)| n.contains(k)).map(|(_, c)| *c)
 }
 
 /// A stable 64-bit hash (FNV-1a) for picking avatar colours.
@@ -317,6 +345,8 @@ pub struct SliderRow {
     pub target: SliderTarget,
     /// What clicking the label/toggle does.
     pub toggle: Action,
+    /// Leading disc or icon.
+    pub leading: RowLeading,
 }
 
 /// Screen-time bar.

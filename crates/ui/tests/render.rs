@@ -72,6 +72,7 @@ fn bodies() -> Vec<Body> {
                 on: true,
                 target: SliderTarget::Noise(NoiseKind::Rain),
                 toggle: Action::NoiseToggle(NoiseKind::Rain),
+                leading: perch_core::view::RowLeading::Kind(perch_core::view::RowKind::Sound),
             }],
             empty: String::new(),
         },
@@ -544,4 +545,147 @@ fn chip_appears_only_on_hover() {
     assert_eq!(chips(&probe), 0, "no chip without hover");
     let hovered = list_render(rows(), 1.0, Some((row.x + 20.0, row.y + row.h / 2.0)));
     assert_eq!(chips(&hovered), 1, "chip while hovered");
+}
+
+fn render_body(
+    body: Body,
+    tab: Tab,
+    pal: Palette,
+    scale: f32,
+) -> (Pixmap, Vec<perch_core::view::Hit>) {
+    let view = PanelView {
+        collapsed: CollapsedView::Idle,
+        tabs: vec![tab],
+        tab: Some(tab),
+        body,
+        pinned: false,
+    };
+    let (w, h) = ((380.0 * scale) as u32, (300.0 * scale) as u32);
+    let mut r = Renderer::new().unwrap_or_else(|e| panic!("{e}"));
+    let mut pm = Pixmap::new(w, h).unwrap_or_else(|| panic!("pixmap"));
+    let mut frame = Frame::new(w, h, scale, pal);
+    frame.progress = 1.0;
+    let hits = r.draw(&mut pm, &frame, &view);
+    (pm, hits)
+}
+
+#[test]
+fn mixer_rows_have_coloured_discs_and_wide_slider_hits() {
+    let body = Body::Sliders {
+        rows: vec![SliderRow {
+            label: "Spotify".into(),
+            value: 0.8,
+            on: true,
+            target: SliderTarget::Volume("spotify".into()),
+            toggle: Action::MuteToggle("spotify".into()),
+            leading: perch_core::view::RowLeading::Disc {
+                initials: "S".into(),
+                rgb: perch_core::view::app_colour("Spotify").unwrap_or([0, 0, 0]),
+            },
+        }],
+        empty: String::new(),
+    };
+    let (pm, hits) = render_body(body, Tab::Mixer, Palette::dark(false), 1.0);
+    let mute = hits
+        .iter()
+        .find(|h| h.kind == perch_core::view::HitKind::Button(Action::MuteToggle("spotify".into())))
+        .unwrap_or_else(|| panic!("the disc mutes"));
+    let p = pm
+        .pixel((mute.x + 4.0) as u32, (mute.y + mute.h / 2.0) as u32)
+        .unwrap_or_else(|| panic!("pixel"));
+    assert!(
+        p.green() > 150 && p.red() < 80,
+        "Spotify green disc, got {:?}",
+        (p.red(), p.green(), p.blue())
+    );
+    let slider = hits
+        .iter()
+        .find(|h| matches!(h.kind, perch_core::view::HitKind::Slider(_)))
+        .unwrap_or_else(|| panic!("slider"));
+    assert!(slider.w >= 0.55 * 356.0, "slider is wide: {}", slider.w);
+}
+
+#[test]
+fn every_body_renders_in_light_and_dark_with_empty_data() {
+    let empties = vec![
+        (Tab::Media, media(None, false)),
+        (
+            Tab::Tasks,
+            Body::Tasks(TasksView {
+                pomodoro: None,
+                todos: Some(Vec::new()),
+                reminder: None,
+            }),
+        ),
+        (
+            Tab::Mail,
+            Body::List {
+                rows: Vec::new(),
+                empty: "No unread mail.".into(),
+                header: None,
+            },
+        ),
+        (
+            Tab::Mixer,
+            Body::Sliders {
+                rows: Vec::new(),
+                empty: "No app is playing sound.".into(),
+            },
+        ),
+        (
+            Tab::Time,
+            Body::Usage {
+                total: "Nothing yet".into(),
+                bars: Vec::new(),
+            },
+        ),
+        (Tab::Tools, Body::Buttons(Vec::new())),
+        (Tab::Media, Body::Empty("Nothing enabled".into())),
+    ];
+    for pal in [Palette::dark(false), Palette::light(false)] {
+        for scale in [1.0_f32, 1.5] {
+            for (tab, body) in empties.clone() {
+                let (pm, _) = render_body(body, tab, pal, scale);
+                // Compare with an empty body: any difference below the header
+                // is the empty-state text (secondary text is translucent, so
+                // look for change rather than for opaque pixels).
+                let (blank, _) = render_body(Body::Empty(String::new()), tab, pal, scale);
+                let header_end = (60.0 * scale) as u32;
+                let text_like = (header_end..pm.height()).any(|y| {
+                    (0..pm.width()).any(|x| pm.pixel(x, y) != blank.pixel(x, y))
+                });
+                let expects_text = !matches!(tab, Tab::Tools);
+                assert!(
+                    !expects_text || text_like,
+                    "{tab:?} empty state shows text ({scale}x)"
+                );
+            }
+        }
+    }
+}
+
+
+#[test]
+fn time_bars_are_rounded_gradients() {
+    let body = Body::Usage {
+        total: "3h 12m today".into(),
+        bars: vec![UsageBar {
+            app: "Code".into(),
+            label: "1h 40m".into(),
+            fraction: 1.0,
+        }],
+    };
+    let (pm, _) = render_body(body, Tab::Time, Palette::dark(false), 1.0);
+    // Find the bar: the reddest pixel row in the body.
+    let mut best = (0u32, 0u32, 0u8);
+    for y in 60..200 {
+        for x in 20..360 {
+            if let Some(p) = pm.pixel(x, y) {
+                if p.red() > best.2 && p.green() < 160 {
+                    best = (x, y, p.red());
+                }
+            }
+        }
+    }
+    assert!(best.2 > 180, "a coral gradient bar is drawn");
 }

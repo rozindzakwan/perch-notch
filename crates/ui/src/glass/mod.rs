@@ -23,7 +23,9 @@ use crate::theme::{Gradient, Palette};
 use crate::tokens::Weight;
 
 pub use surface::{banner, surface};
-pub use widgets::{avatar, chip, image, progress, ring, round_button, row, slider, tabs, toggle};
+pub use widgets::{
+    avatar, chip, image, leading_at, progress, ring, round_button, row, slider, tabs, toggle,
+};
 
 /// What sits at the start of a list row or banner.
 #[derive(Debug, Clone, PartialEq)]
@@ -41,6 +43,13 @@ pub enum Leading {
     Thumb(Arc<Vec<u8>>, u32),
     /// A round check (to-dos): filled green with a tick when done.
     Check(bool),
+    /// Initials on a solid disc (app brand colours).
+    Disc {
+        /// One or two letters.
+        initials: String,
+        /// Disc colour.
+        color: Color,
+    },
     /// Nothing.
     None,
 }

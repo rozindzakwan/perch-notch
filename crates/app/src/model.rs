@@ -1148,6 +1148,16 @@ impl Model {
                             on: !s.muted,
                             target: SliderTarget::Volume(s.id.clone()),
                             toggle: Action::MuteToggle(s.id.clone()),
+                            leading: match perch_core::view::app_colour(&s.name) {
+                                Some(rgb) => RowLeading::Disc {
+                                    initials: perch_core::view::initials(&s.name),
+                                    rgb,
+                                },
+                                None => RowLeading::Avatar {
+                                    initials: perch_core::view::initials(&s.name),
+                                    seed: perch_core::view::seed(&s.name),
+                                },
+                            },
                         })
                         .collect(),
                     empty: "No app is playing sound.".into(),
@@ -1161,6 +1171,7 @@ impl Model {
                             on: self.noise.is_on(*k),
                             target: SliderTarget::Noise(*k),
                             toggle: Action::NoiseToggle(*k),
+                            leading: RowLeading::Kind(RowKind::Sound),
                         })
                         .collect(),
                     empty: String::new(),

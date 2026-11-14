@@ -11,7 +11,7 @@ use perch_core::view::{
     Action, BadgeKind, Body, CollapsedView, Glyph, Hit, HitKind, MediaView, PanelView, Row,
     SliderRow, TasksView, UsageBar,
 };
-use tiny_skia::{Color, FillRule, Mask, Paint, Pixmap, PixmapPaint, Stroke, Transform};
+use tiny_skia::{Color, FillRule, Mask, Pixmap, Transform};
 
 use crate::art;
 use crate::effects::Effects;
@@ -96,107 +96,6 @@ impl Frame {
 pub struct Renderer {
     text: TextRenderer,
     fx: Effects,
-}
-
-/// Per-frame drawing context for the screens not yet moved to `glass`.
-struct Painter<'a> {
-    pm: &'a mut Pixmap,
-    text: &'a mut TextRenderer,
-    pal: Palette,
-    s: f32,
-    hits: Vec<Hit>,
-}
-
-fn paint(color: Color) -> Paint<'static> {
-    let mut p = Paint {
-        anti_alias: true,
-        ..Default::default()
-    };
-    p.set_color(color);
-    p
-}
-
-fn with_alpha(c: Color, a: f32) -> Color {
-    let mut c = c;
-    c.apply_opacity(a);
-    c
-}
-
-impl Painter<'_> {
-    fn fill(&mut self, path: Option<tiny_skia::Path>, color: Color) {
-        if let Some(p) = path {
-            self.pm.fill_path(
-                &p,
-                &paint(color),
-                FillRule::Winding,
-                Transform::identity(),
-                None,
-            );
-        }
-    }
-
-    fn rrect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, color: Color) {
-        self.fill(art::rounded_rect(x, y, w, h, r), color);
-    }
-
-    fn stroke(&mut self, path: Option<tiny_skia::Path>, color: Color, width: f32) {
-        if let Some(p) = path {
-            let st = Stroke {
-                width,
-                line_cap: tiny_skia::LineCap::Round,
-                ..Default::default()
-            };
-            self.pm
-                .stroke_path(&p, &paint(color), &st, Transform::identity(), None);
-        }
-    }
-
-    /// Text vertically centred in a band `[top, top + band_h)`.
-    fn text_in(
-        &mut self,
-        s: &str,
-        x: f32,
-        top: f32,
-        band_h: f32,
-        px: f32,
-        color: Color,
-        max_w: f32,
-    ) -> f32 {
-        if max_w <= 0.0 || s.is_empty() {
-            return 0.0;
-        }
-        let shown = self.text.elide(s, px, max_w);
-        let m = self.text.measure(&shown, px);
-        let baseline = top + (band_h + m.ascent - m.descent) / 2.0;
-        self.text
-            .draw(self.pm, &shown, x, baseline, px, color, max_w)
-    }
-
-    fn measure(&mut self, s: &str, px: f32) -> f32 {
-        self.text.measure(s, px).width
-    }
-
-    fn hit(&mut self, x: f32, y: f32, w: f32, h: f32, kind: HitKind) {
-        if w > 0.0 && h > 0.0 {
-            self.hits.push(Hit { x, y, w, h, kind });
-        }
-    }
-
-    fn button(&mut self, x: f32, y: f32, w: f32, h: f32, action: Action) {
-        self.hit(x, y, w, h, HitKind::Button(action));
-    }
-
-    /// A small text button; returns its width.
-    fn text_button(&mut self, label: &str, right: f32, y: f32, h: f32, action: Action) -> f32 {
-        let s = self.s;
-        let px = 11.5 * s;
-        let w = self.measure(label, px) + 14.0 * s;
-        let x = right - w;
-        self.rrect(x, y, w, h, h / 2.0, with_alpha(self.pal.fg, 0.10));
-        self.text_in(label, x + 7.0 * s, y, h, px, self.pal.fg, w);
-        self.button(x, y, w, h, action);
-        w
-    }
 }
 
 impl Renderer {
@@ -525,537 +424,29 @@ fn draw_panel(ctx: &mut Ctx<'_>, view: &PanelView, panel: (f32, f32, f32, f32), 
         (lh - HEADER * s - pad).max(0.0),
     );
     match &view.body {
-        Body::Media(m) => return music(ctx, m, body),
-        Body::Tasks(t) => return tasks(ctx, t, body),
+        Body::Media(m) => music(ctx, m, body),
+        Body::Tasks(t) => tasks(ctx, t, body),
         Body::List {
             rows,
             empty,
             header,
-        } => return list(ctx, rows, empty, header.as_ref(), body),
-        _ => {}
-    }
-    // Screens not yet restyled go through the older painter.
-    let mut pal = ctx.pal;
-    let a = ctx.alpha;
-    for c in [&mut pal.fg, &mut pal.muted, &mut pal.surface, &mut pal.bg] {
-        c.apply_opacity(a);
-    }
-    pal.accent.from.apply_opacity(a);
-    let mut p = Painter {
-        pm: ctx.pm,
-        text: ctx.text,
-        pal,
-        s,
-        hits: Vec::new(),
-    };
-    draw_body(&mut p, view, body);
-    let hits = std::mem::take(&mut p.hits);
-    ctx.hits.extend(hits);
-}
-
-fn draw_body(p: &mut Painter<'_>, view: &PanelView, (bx, by, bw, bh): (f32, f32, f32, f32)) {
-    let s = p.s;
-    match &view.body {
-        Body::Media(m) => draw_media(p, m, bx, by, bw, bh),
-        Body::Tasks(t) => draw_tasks(p, t, bx, by, bw, bh),
-        Body::List {
-            rows,
-            empty,
-            header,
-        } => {
-            let mut y = by;
-            if let Some((label, action)) = header {
-                let hh = 18.0 * s;
-                p.text_button(label, bx + bw, y, hh, action.clone());
-                let count = format!(
-                    "{} item{}",
-                    rows.len(),
-                    if rows.len() == 1 { "" } else { "s" }
-                );
-                let muted = p.pal.muted;
-                p.text_in(&count, bx, y, hh, 11.0 * s, muted, bw / 2.0);
-                y += hh + 4.0 * s;
-            }
-            draw_rows(p, rows, empty, bx, y, bw, by + bh - y);
-        }
-        Body::Sliders { rows, empty } => draw_sliders(p, rows, empty, bx, by, bw, bh),
-        Body::Usage { total, bars } => draw_usage(p, total, bars, bx, by, bw, bh),
-        Body::Buttons(buttons) => draw_buttons(p, buttons, bx, by, bw, bh),
-        Body::Empty(text) => {
-            let muted = p.pal.muted;
-            p.text_in(text, bx, by, bh, 12.0 * s, muted, bw);
-        }
-    }
-}
-
-fn draw_media(p: &mut Painter<'_>, m: &MediaView, x: f32, y: f32, w: f32, h: f32) {
-    let s = p.s;
-    let art_side = h.min(w * 0.3).max(8.0 * s);
-    // Cover art or a placeholder with the mascot.
-    let mut drew = false;
-    if let Some((rgba, side)) = &m.cover {
-        if *side > 0 && rgba.len() as u32 >= side * side * 4 {
-            if let Some(mut cover) = Pixmap::new(*side, *side) {
-                copy_rgba(&mut cover, rgba, *side);
-                let k = art_side / *side as f32;
-                if let (Some(mask_path), Some(mut mask)) = (
-                    art::rounded_rect(x, y, art_side, art_side, 8.0 * s),
-                    tiny_skia::Mask::new(p.pm.width(), p.pm.height()),
-                ) {
-                    mask.fill_path(&mask_path, FillRule::Winding, true, Transform::identity());
-                    p.pm.draw_pixmap(
-                        0,
-                        0,
-                        cover.as_ref(),
-                        &PixmapPaint {
-                            quality: tiny_skia::FilterQuality::Bilinear,
-                            ..Default::default()
-                        },
-                        Transform::from_scale(k, k).post_translate(x, y),
-                        Some(&mask),
-                    );
-                    drew = true;
-                }
-            }
-        }
-    }
-    if !drew {
-        let muted = with_alpha(p.pal.fg, 0.12);
-        p.rrect(x, y, art_side, art_side, 8.0 * s, muted);
-        let inset = art_side * 0.2;
-        let fg = with_alpha(p.pal.fg, 0.55);
-        p.fill(
-            art::mascot(x + inset, y + inset, art_side - 2.0 * inset),
-            fg,
-        );
-    }
-
-    let tx = x + art_side + 14.0 * s;
-    let tw = (x + w - tx).max(0.0);
-    let title_px = 15.0 * s;
-    let sub_px = 12.0 * s;
-    let fg = p.pal.fg;
-    let muted = p.pal.muted;
-    let accent = p.pal.accent.from;
-    let mut ty = y;
-    p.text_in(&m.title, tx, ty, 20.0 * s, title_px, fg, tw);
-    ty += 20.0 * s;
-    if !m.artist.is_empty() {
-        p.text_in(&m.artist, tx, ty, 16.0 * s, sub_px, muted, tw);
-    }
-    ty += 18.0 * s;
-    if let Some(l) = &m.lyric {
-        p.text_in(l, tx, ty, 16.0 * s, sub_px, accent, tw);
-    }
-
-    if !m.has_player {
-        return;
-    }
-    // Controls + seek bar along the bottom of the text column.
-    let icon = 16.0 * s;
-    let gap = 16.0 * s;
-    let cy = y + h - icon;
-    let total = icon * 3.0 + gap * 2.0;
-    let cx = tx;
-    p.fill(art::icon_prev(cx, cy, icon), fg);
-    p.button(
-        cx - 4.0 * s,
-        cy - 4.0 * s,
-        icon + 8.0 * s,
-        icon + 8.0 * s,
-        Action::Transport(TransportCommand::Previous),
-    );
-    let mid = cx + icon + gap;
-    let play = if m.playing {
-        art::icon_pause(mid, cy, icon)
-    } else {
-        art::icon_play(mid, cy, icon)
-    };
-    p.fill(play, fg);
-    p.button(
-        mid - 4.0 * s,
-        cy - 4.0 * s,
-        icon + 8.0 * s,
-        icon + 8.0 * s,
-        Action::Transport(TransportCommand::PlayPause),
-    );
-    let nx = cx + 2.0 * (icon + gap);
-    p.fill(art::icon_next(nx, cy, icon), fg);
-    p.button(
-        nx - 4.0 * s,
-        cy - 4.0 * s,
-        icon + 8.0 * s,
-        icon + 8.0 * s,
-        Action::Transport(TransportCommand::Next),
-    );
-
-    if let Some(f) = m.fraction {
-        let bar_x = cx + total + 14.0 * s;
-        let bar_w = (x + w - bar_x).max(0.0);
-        let bar_y = cy + icon / 2.0 - 1.5 * s;
-        if bar_w > 20.0 * s {
-            let border = with_alpha(p.pal.fg, 0.18);
-            p.rrect(bar_x, bar_y, bar_w, 3.0 * s, 1.5 * s, border);
-            p.rrect(
-                bar_x,
-                bar_y,
-                bar_w * f.clamp(0.0, 1.0) as f32,
-                3.0 * s,
-                1.5 * s,
-                accent,
-            );
-            p.hit(
-                bar_x,
-                bar_y - 8.0 * s,
-                bar_w,
-                19.0 * s,
-                HitKind::Slider(perch_core::view::SliderTarget::Seek),
-            );
-            if let Some((a, b)) = &m.times {
-                let px = 10.0 * s;
-                p.text_in(a, bar_x, bar_y - 16.0 * s, 12.0 * s, px, muted, bar_w / 2.0);
-                let bw = p.measure(b, px);
-                p.text_in(
-                    b,
-                    bar_x + bar_w - bw,
-                    bar_y - 16.0 * s,
-                    12.0 * s,
-                    px,
-                    muted,
-                    bw + 1.0,
-                );
-            }
-        }
-    }
-}
-
-fn draw_tasks(p: &mut Painter<'_>, t: &TasksView, x: f32, y: f32, w: f32, h: f32) {
-    let s = p.s;
-    let row_h = 20.0 * s;
-    let mut cy = y;
-    let fg = p.pal.fg;
-    let muted = p.pal.muted;
-    let accent = p.pal.accent.from;
-    if let Some(pomo) = &t.pomodoro {
-        // [play/pause] Focus 24:13   [skip] [reset]          Water in 12 min
-        let icon = 14.0 * s;
-        let iy = cy + (row_h - icon) / 2.0;
-        let shape = if pomo.running {
-            art::icon_pause(x, iy, icon)
-        } else {
-            art::icon_play(x, iy, icon)
-        };
-        p.fill(shape, accent);
-        p.button(
-            x - 3.0 * s,
-            cy,
-            icon + 6.0 * s,
-            row_h,
-            Action::PomodoroToggle,
-        );
-        let lw = p.text_in(
-            &pomo.label,
-            x + icon + 8.0 * s,
-            cy,
-            row_h,
-            13.0 * s,
-            fg,
-            w * 0.45,
-        );
-        let mut bx = x + icon + 16.0 * s + lw;
-        p.fill(art::icon_next(bx, iy, icon * 0.9), muted);
-        p.button(
-            bx - 3.0 * s,
-            cy,
-            icon + 6.0 * s,
-            row_h,
-            Action::PomodoroSkip,
-        );
-        bx += icon + 10.0 * s;
-        p.stroke(art::reset(bx, iy, icon * 0.9), muted, 1.4 * s);
-        p.button(
-            bx - 3.0 * s,
-            cy,
-            icon + 6.0 * s,
-            row_h,
-            Action::PomodoroReset,
-        );
-    }
-    if let Some(r) = &t.reminder {
-        let rw = p.measure(r, 11.0 * s);
-        p.text_in(r, x + w - rw, cy, row_h, 11.0 * s, muted, rw + 1.0);
-    }
-    if t.pomodoro.is_some() || t.reminder.is_some() {
-        cy += row_h + 4.0 * s;
-    }
-    if let Some(rows) = &t.todos {
-        let hh = 18.0 * s;
-        p.text_button("+ Add", x + w, cy, hh, Action::TodoAdd);
-        let pending = rows.iter().filter(|r| r.check == Some(false)).count();
-        p.text_in(
-            &format!("To-do  ({pending} open)"),
-            x,
-            cy,
-            hh,
-            11.0 * s,
-            muted,
-            w / 2.0,
-        );
-        cy += hh + 4.0 * s;
-        draw_rows(p, rows, "Nothing to do. Nice.", x, cy, w, y + h - cy);
-    }
-}
-
-fn draw_rows(p: &mut Painter<'_>, rows: &[Row], empty: &str, x: f32, y: f32, w: f32, h: f32) {
-    let s = p.s;
-    let row_h = 20.0 * s;
-    let muted = p.pal.muted;
-    if rows.is_empty() {
-        p.text_in(empty, x, y, row_h, 12.0 * s, muted, w);
-        return;
-    }
-    let mut cy = y;
-    for row in rows {
-        if cy + row_h > y + h + 0.5 {
-            break;
-        }
-        let color = if row.dim { muted } else { p.pal.fg };
-        let mut tx = x;
-        if let Some(checked) = row.check {
-            let b = 12.0 * s;
-            let by = cy + (row_h - b) / 2.0;
-            p.stroke(art::rounded_rect(tx, by, b, b, 3.0 * s), muted, 1.2 * s);
-            if checked {
-                let accent = p.pal.accent.from;
-                p.stroke(
-                    art::check(tx + 2.0 * s, by + 2.0 * s, b - 4.0 * s),
-                    accent,
-                    1.6 * s,
-                );
-            }
-            tx += b + 8.0 * s;
-        }
-        let close = 14.0 * s;
-        let detail_w = if row.detail.is_empty() {
-            0.0
-        } else {
-            p.measure(&row.detail, 10.5 * s) + 8.0 * s
-        };
-        let text_w = (x + w - tx - detail_w - close - 6.0 * s).max(0.0);
-        p.text_in(&row.text, tx, cy, row_h, 12.5 * s, color, text_w);
-        if detail_w > 0.0 {
-            p.text_in(
-                &row.detail,
-                x + w - close - 6.0 * s - detail_w,
-                cy,
-                row_h,
-                10.5 * s,
+        } => list(ctx, rows, empty, header.as_ref(), body),
+        Body::Sliders { rows, empty } => sliders(ctx, rows, empty, body),
+        Body::Usage { total, bars } => usage(ctx, total, bars, body),
+        Body::Buttons(items) => buttons(ctx, items, body),
+        Body::Empty(msg) => {
+            let muted = ctx.fade(ctx.pal.fg, crate::tokens::SECONDARY_ALPHA);
+            let (bx, by, bw, _) = body;
+            let tw = ctx.measure(msg, text::BODY).min(bw);
+            ctx.text(
+                msg,
+                bx + (bw - tw) / 2.0,
+                by,
+                40.0 * s,
+                text::BODY,
                 muted,
-                detail_w,
+                bw,
             );
-        }
-        if let Some(a) = &row.primary {
-            p.button(x, cy, w - close - 4.0 * s, row_h, a.clone());
-        }
-        if let Some(a) = &row.remove {
-            let cx = x + w - close;
-            p.stroke(
-                art::cross(
-                    cx + 3.0 * s,
-                    cy + (row_h - close) / 2.0 + 3.0 * s,
-                    close - 6.0 * s,
-                ),
-                muted,
-                1.3 * s,
-            );
-            p.button(cx - 2.0 * s, cy, close + 4.0 * s, row_h, a.clone());
-        }
-        cy += row_h;
-    }
-}
-
-fn draw_sliders(
-    p: &mut Painter<'_>,
-    rows: &[SliderRow],
-    empty: &str,
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-) {
-    let s = p.s;
-    let row_h = 24.0 * s;
-    let muted = p.pal.muted;
-    if rows.is_empty() {
-        p.text_in(empty, x, y, row_h, 12.0 * s, muted, w);
-        return;
-    }
-    let label_w = (w * 0.32).min(150.0 * s);
-    let mut cy = y;
-    for row in rows {
-        if cy + row_h > y + h + 0.5 {
-            break;
-        }
-        let dot = 9.0 * s;
-        let accent = p.pal.accent.from;
-        let dot_color = if row.on {
-            accent
-        } else {
-            with_alpha(p.pal.fg, 0.25)
-        };
-        p.rrect(x, cy + (row_h - dot) / 2.0, dot, dot, dot / 2.0, dot_color);
-        let color = if row.on { p.pal.fg } else { muted };
-        p.text_in(
-            &row.label,
-            x + dot + 8.0 * s,
-            cy,
-            row_h,
-            12.5 * s,
-            color,
-            label_w - dot - 8.0 * s,
-        );
-        p.button(x - 2.0 * s, cy, label_w, row_h, row.toggle.clone());
-
-        let pct = format!("{:>3}%", (row.value * 100.0).round() as i32);
-        let pct_w = 34.0 * s;
-        let sx = x + label_w + 6.0 * s;
-        let sw = (x + w - sx - pct_w).max(0.0);
-        let track_y = cy + row_h / 2.0 - 2.0 * s;
-        let track = with_alpha(p.pal.fg, 0.18);
-        p.rrect(sx, track_y, sw, 4.0 * s, 2.0 * s, track);
-        let fill = if row.on { accent } else { muted };
-        p.rrect(
-            sx,
-            track_y,
-            sw * row.value.clamp(0.0, 1.0),
-            4.0 * s,
-            2.0 * s,
-            fill,
-        );
-        let knob = 10.0 * s;
-        let fg = p.pal.fg;
-        p.rrect(
-            sx + sw * row.value.clamp(0.0, 1.0) - knob / 2.0,
-            cy + (row_h - knob) / 2.0,
-            knob,
-            knob,
-            knob / 2.0,
-            fg,
-        );
-        p.hit(sx, cy, sw, row_h, HitKind::Slider(row.target.clone()));
-        p.text_in(
-            &pct,
-            x + w - pct_w + 4.0 * s,
-            cy,
-            row_h,
-            11.0 * s,
-            muted,
-            pct_w,
-        );
-        cy += row_h;
-    }
-}
-
-fn draw_usage(p: &mut Painter<'_>, total: &str, bars: &[UsageBar], x: f32, y: f32, w: f32, h: f32) {
-    let s = p.s;
-    let fg = p.pal.fg;
-    let muted = p.pal.muted;
-    let accent = p.pal.accent.from;
-    p.text_in(total, x, y, 18.0 * s, 13.0 * s, fg, w);
-    let mut cy = y + 22.0 * s;
-    let row_h = 18.0 * s;
-    if bars.is_empty() {
-        p.text_in(
-            "No activity recorded yet today.",
-            x,
-            cy,
-            row_h,
-            12.0 * s,
-            muted,
-            w,
-        );
-        return;
-    }
-    let name_w = (w * 0.3).min(140.0 * s);
-    for bar in bars {
-        if cy + row_h > y + h + 0.5 {
-            break;
-        }
-        p.text_in(&bar.app, x, cy, row_h, 11.5 * s, fg, name_w - 6.0 * s);
-        let label_w = p.measure(&bar.label, 10.5 * s) + 6.0 * s;
-        let bx = x + name_w;
-        let bw = (w - name_w - label_w).max(0.0);
-        let track = with_alpha(p.pal.fg, 0.10);
-        p.rrect(bx, cy + row_h / 2.0 - 3.0 * s, bw, 6.0 * s, 3.0 * s, track);
-        p.rrect(
-            bx,
-            cy + row_h / 2.0 - 3.0 * s,
-            (bw * bar.fraction.clamp(0.0, 1.0)).max(6.0 * s),
-            6.0 * s,
-            3.0 * s,
-            accent,
-        );
-        p.text_in(
-            &bar.label,
-            x + w - label_w + 6.0 * s,
-            cy,
-            row_h,
-            10.5 * s,
-            muted,
-            label_w,
-        );
-        cy += row_h + 2.0 * s;
-    }
-}
-
-fn draw_buttons(p: &mut Painter<'_>, buttons: &[(String, Action)], x: f32, y: f32, w: f32, h: f32) {
-    let s = p.s;
-    if buttons.is_empty() {
-        let muted = p.pal.muted;
-        p.text_in("No tools enabled.", x, y, 20.0 * s, 12.0 * s, muted, w);
-        return;
-    }
-    let n = buttons.len() as f32;
-    let gap = 10.0 * s;
-    let bw = ((w - gap * (n - 1.0)) / n).max(0.0);
-    let bh = (h * 0.6).clamp(28.0 * s, 56.0 * s);
-    let by = y + (h - bh) / 2.0;
-    for (i, (label, action)) in buttons.iter().enumerate() {
-        let bx = x + i as f32 * (bw + gap);
-        let bg = with_alpha(p.pal.fg, 0.10);
-        p.rrect(bx, by, bw, bh, 10.0 * s, bg);
-        let px = 13.0 * s;
-        let lw = p.measure(label, px);
-        let fg = p.pal.fg;
-        p.text_in(label, bx + (bw - lw) / 2.0, by, bh, px, fg, bw);
-        p.button(bx, by, bw, bh, action.clone());
-    }
-}
-
-/// Copy straight RGBA8 bytes into a premultiplied pixmap.
-fn copy_rgba(pm: &mut Pixmap, rgba: &[u8], side: u32) {
-    let pixels = pm.pixels_mut();
-    for i in 0..(side as usize * side as usize) {
-        let o = i * 4;
-        let (r, g, b, a) = match (
-            rgba.get(o),
-            rgba.get(o + 1),
-            rgba.get(o + 2),
-            rgba.get(o + 3),
-        ) {
-            (Some(r), Some(g), Some(b), Some(a)) => (*r, *g, *b, *a),
-            _ => continue,
-        };
-        let af = f32::from(a) / 255.0;
-        if let Some(px) = tiny_skia::PremultipliedColorU8::from_rgba(
-            (f32::from(r) * af).round() as u8,
-            (f32::from(g) * af).round() as u8,
-            (f32::from(b) * af).round() as u8,
-            a,
-        ) {
-            if let Some(slot) = pixels.get_mut(i) {
-                *slot = px;
-            }
         }
     }
 }
@@ -1348,6 +739,7 @@ fn kind_icon(k: perch_core::view::RowKind) -> Icon {
         RowKind::File => Icon::Text,
         RowKind::Folder => Icon::Shelf,
         RowKind::Warning => Icon::Warning,
+        RowKind::Sound => Icon::Waves,
     }
 }
 
@@ -1364,6 +756,10 @@ fn row_leading(r: &Row) -> glass::Leading {
             seed: *seed,
         },
         RowLeading::Kind(k) => glass::Leading::Icon(kind_icon(*k), None),
+        RowLeading::Disc { initials, rgb } => glass::Leading::Disc {
+            initials: initials.clone(),
+            color: Color::from_rgba8(rgb[0], rgb[1], rgb[2], 255),
+        },
         RowLeading::Thumb(px, side) => glass::Leading::Thumb(px.clone(), *side),
     }
 }
@@ -1427,5 +823,157 @@ fn list(
             r.dim,
         );
         top += rh;
+    }
+}
+
+fn slider_leading(r: &SliderRow) -> glass::Leading {
+    use perch_core::view::RowLeading;
+    if !r.on {
+        return glass::Leading::Icon(Icon::Mute, None);
+    }
+    match &r.leading {
+        RowLeading::Disc { initials, rgb } => glass::Leading::Disc {
+            initials: initials.clone(),
+            color: Color::from_rgba8(rgb[0], rgb[1], rgb[2], 255),
+        },
+        RowLeading::Avatar { initials, seed } => glass::Leading::Avatar {
+            initials: initials.clone(),
+            seed: *seed,
+        },
+        RowLeading::Kind(k) => glass::Leading::Icon(kind_icon(*k), None),
+        RowLeading::Thumb(px, side) => glass::Leading::Thumb(px.clone(), *side),
+        RowLeading::None => glass::Leading::None,
+    }
+}
+
+/// Mixer / sounds: disc (click to mute), name, thick slider.
+fn sliders(ctx: &mut Ctx<'_>, rows: &[SliderRow], empty: &str, (x, y, w, h): (f32, f32, f32, f32)) {
+    let s = ctx.s;
+    let muted = ctx.fade(ctx.pal.fg, crate::tokens::SECONDARY_ALPHA);
+    if rows.is_empty() {
+        let tw = ctx.measure(empty, text::BODY).min(w);
+        ctx.text(empty, x + (w - tw) / 2.0, y, 40.0 * s, text::BODY, muted, w);
+        return;
+    }
+    let rh = 38.0 * s;
+    let d = 28.0 * s;
+    let label_w = 76.0 * s;
+    let mut top = y;
+    for r in rows {
+        if top + rh > y + h + 1.0 {
+            break;
+        }
+        let saved = ctx.alpha;
+        if !r.on {
+            ctx.alpha *= 0.6;
+        }
+        let ly = top + (rh - d) / 2.0;
+        glass::leading_at(ctx, &slider_leading(r), x, ly, d);
+        ctx.button((x, ly, d, d), r.toggle.clone());
+        let fg = ctx.pal.fg;
+        ctx.text(&r.label, x + d + 10.0 * s, top, rh, text::BODY, fg, label_w);
+        let sx = x + d + 10.0 * s + label_w + 8.0 * s;
+        let sh = 22.0 * s;
+        glass::slider(
+            ctx,
+            (sx, top + (rh - sh) / 2.0, (x + w - sx).max(0.0), sh),
+            r.value,
+            r.on,
+            r.target.clone(),
+        );
+        ctx.alpha = saved;
+        top += rh;
+    }
+}
+
+/// Screen time: today's total, then a rounded gradient bar per app.
+fn usage(ctx: &mut Ctx<'_>, total: &str, bars: &[UsageBar], (x, y, w, h): (f32, f32, f32, f32)) {
+    let s = ctx.s;
+    let muted = ctx.fade(ctx.pal.fg, crate::tokens::SECONDARY_ALPHA);
+    let fg = ctx.pal.fg;
+    ctx.text(total, x, y, 22.0 * s, text::TITLE, fg, w);
+    let mut top = y + 30.0 * s;
+    if bars.is_empty() {
+        ctx.text(
+            "Use your apps for a while and they show up here.",
+            x,
+            top,
+            20.0 * s,
+            text::SECONDARY,
+            muted,
+            w,
+        );
+        return;
+    }
+    let g = ctx.pal.accent;
+    let rh = 32.0 * s;
+    for b in bars {
+        if top + rh > y + h + 1.0 {
+            break;
+        }
+        let lw = ctx
+            .text
+            .measure_tabular(&b.label, text::CAPTION.0 * s, Weight::Medium)
+            .width;
+        ctx.text(
+            &b.app,
+            x,
+            top,
+            16.0 * s,
+            text::BODY,
+            fg,
+            (w - lw - 8.0 * s).max(0.0),
+        );
+        let base = top + 12.0 * s;
+        let c = ctx.fade(muted, 1.0);
+        ctx.text.draw_tabular(
+            ctx.pm,
+            &b.label,
+            x + w - lw,
+            base,
+            text::CAPTION.0 * s,
+            c,
+            lw + 2.0,
+            Weight::Medium,
+        );
+        glass::progress(ctx, (x, top + 19.0 * s, w, 6.0 * s), b.fraction, g);
+        top += rh;
+    }
+}
+
+fn tool_icon(a: &Action) -> Icon {
+    match a {
+        Action::Screenshot => Icon::Screenshot,
+        Action::CameraToggle => Icon::Camera,
+        Action::DictateToggle => Icon::Mic,
+        _ => Icon::Tools,
+    }
+}
+
+/// Tools: big round icon buttons with a caption.
+fn buttons(ctx: &mut Ctx<'_>, items: &[(String, Action)], (x, y, w, _h): (f32, f32, f32, f32)) {
+    let s = ctx.s;
+    if items.is_empty() {
+        return;
+    }
+    let d = 56.0 * s;
+    let gap = 24.0 * s;
+    let total = items.len() as f32 * d + (items.len() - 1) as f32 * gap;
+    let mut cx = x + (w - total) / 2.0 + d / 2.0;
+    let cy = y + 8.0 * s + d / 2.0;
+    let muted = ctx.fade(ctx.pal.fg, crate::tokens::SECONDARY_ALPHA);
+    for (label, action) in items {
+        glass::round_button(ctx, cx, cy, d, tool_icon(action), false, action.clone());
+        let tw = ctx.measure(label, text::CAPTION);
+        ctx.text(
+            label,
+            cx - tw / 2.0,
+            cy + d / 2.0 + 6.0 * s,
+            16.0 * s,
+            text::CAPTION,
+            muted,
+            tw + 2.0,
+        );
+        cx += d + gap;
     }
 }

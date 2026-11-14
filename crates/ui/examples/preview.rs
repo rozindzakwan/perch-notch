@@ -114,6 +114,10 @@ fn panels() -> Vec<(&'static str, Tab, Body)> {
                         on: true,
                         target: SliderTarget::Volume("spotify".into()),
                         toggle: Action::MuteToggle("spotify".into()),
+                        leading: perch_core::view::RowLeading::Disc {
+                            initials: "S".into(),
+                            rgb: [0x1D, 0xB9, 0x54],
+                        },
                     },
                     SliderRow {
                         label: "Chrome".into(),
@@ -121,6 +125,10 @@ fn panels() -> Vec<(&'static str, Tab, Body)> {
                         on: true,
                         target: SliderTarget::Volume("chrome".into()),
                         toggle: Action::MuteToggle("chrome".into()),
+                        leading: perch_core::view::RowLeading::Disc {
+                            initials: "C".into(),
+                            rgb: [0x42, 0x85, 0xF4],
+                        },
                     },
                 ],
                 empty: "No app is playing sound.".into(),
@@ -136,6 +144,7 @@ fn panels() -> Vec<(&'static str, Tab, Body)> {
                     on: true,
                     target: SliderTarget::Noise(NoiseKind::Rain),
                     toggle: Action::OpenSettings,
+                    leading: perch_core::view::RowLeading::Kind(perch_core::view::RowKind::Sound),
                 }],
                 empty: String::new(),
             },
