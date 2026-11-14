@@ -41,3 +41,9 @@ WORKDIR /src
 RUN apt-get update && apt-get install -y --no-install-recommends \
         jq wmctrl x11-apps stalonetray espeak-ng \
     && rm -rf /var/lib/apt/lists/*
+
+# Mail test: a throwaway Dovecot IMAP server, and a Secret Service (GNOME
+# Keyring) for the password, plus secret-tool for inspecting it.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        dovecot-imapd gnome-keyring libsecret-tools openssl \
+    && rm -rf /var/lib/apt/lists/*

@@ -10,6 +10,7 @@ description = "Linux (X11 primary, Wayland best-effort) backends for Perch"
 log.workspace = true
 perch-core = { path = "../core" }
 zbus = { workspace = true }
+serde.workspace = true
 arboard.workspace = true
 libpulse-binding = { version = "2.30", default-features = false }
 image = { workspace = true }

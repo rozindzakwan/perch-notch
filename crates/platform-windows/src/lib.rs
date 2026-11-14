@@ -26,6 +26,8 @@ pub mod mixer;
 #[cfg(windows)]
 mod monitors;
 #[cfg(windows)]
+pub mod secrets;
+#[cfg(windows)]
 pub mod services;
 #[cfg(windows)]
 mod single_instance;

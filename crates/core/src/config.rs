@@ -138,6 +138,8 @@ pub struct FeatureFlags {
     pub screenshot: bool,
     /// Camera mirror.
     pub camera_mirror: bool,
+    /// Read-only mail summary (network, opt-in).
+    pub mail: bool,
 }
 
 impl Default for FeatureFlags {
@@ -156,6 +158,7 @@ impl Default for FeatureFlags {
             speech_to_text: false,
             screenshot: false,
             camera_mirror: false,
+            mail: false,
         }
     }
 }
@@ -301,6 +304,124 @@ impl HotkeysConfig {
     }
 }
 
+/// One mail account (read-only IMAP). The password is never stored here; it
+/// lives in the OS keychain under [`MailAccount::secret_key`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MailAccount {
+    /// Shown in the Mail tab ("Work", "Personal").
+    pub name: String,
+    /// Sign-in name, usually the address.
+    pub username: String,
+    /// IMAP server.
+    pub host: String,
+    /// IMAP port (993 for TLS, 143 for STARTTLS).
+    pub port: u16,
+    /// Connection security.
+    pub security: crate::mail::Security,
+    /// Folder to watch.
+    pub folder: String,
+    /// Extra PEM CA certificate to trust (self-hosted servers); empty = system roots only.
+    pub ca_file: String,
+}
+
+impl Default for MailAccount {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            username: String::new(),
+            host: String::new(),
+            port: 993,
+            security: crate::mail::Security::Tls,
+            folder: "INBOX".into(),
+            ca_file: String::new(),
+        }
+    }
+}
+
+impl MailAccount {
+    /// Keychain key for this account's password.
+    pub fn secret_key(&self) -> String {
+        format!(
+            "mail:{}@{}",
+            self.username.trim(),
+            self.host.trim().to_ascii_lowercase()
+        )
+    }
+
+    /// Why this account cannot be used, if it cannot.
+    pub fn problem(&self) -> Option<String> {
+        if self.username.trim().is_empty() {
+            return Some("no username".into());
+        }
+        if self.host.trim().is_empty() {
+            return Some("no server".into());
+        }
+        if self.security == crate::mail::Security::Plain && !crate::mail::is_loopback(&self.host) {
+            return Some("unencrypted connections are only allowed to localhost".into());
+        }
+        None
+    }
+}
+
+/// Read-only mail settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MailConfig {
+    /// Show a notification when new mail arrives.
+    pub notify: bool,
+    /// Include the subject in notifications (off = sender only).
+    pub notify_subject: bool,
+    /// How many unread messages per account the Mail tab lists.
+    pub max_items: usize,
+    /// Minutes between checks for servers without IMAP IDLE (push).
+    pub poll_minutes: u32,
+    /// Accounts.
+    pub accounts: Vec<MailAccount>,
+}
+
+impl Default for MailConfig {
+    fn default() -> Self {
+        Self {
+            notify: true,
+            notify_subject: true,
+            max_items: 10,
+            poll_minutes: 5,
+            accounts: Vec::new(),
+        }
+    }
+}
+
+impl MailConfig {
+    fn clamp(&mut self) {
+        self.max_items = self.max_items.clamp(1, 50);
+        self.poll_minutes = self.poll_minutes.clamp(1, 120);
+        for a in &mut self.accounts {
+            if a.folder.trim().is_empty() {
+                a.folder = "INBOX".into();
+            }
+            if a.port == 0 {
+                a.port = 993;
+            }
+            if a.name.trim().is_empty() {
+                a.name = a.username.clone();
+            }
+        }
+        // Names identify accounts in the UI and in updates; keep them unique.
+        let mut seen: Vec<String> = Vec::new();
+        for a in &mut self.accounts {
+            let mut name = a.name.clone();
+            let mut n = 2;
+            while seen.contains(&name) {
+                name = format!("{} ({n})", a.name);
+                n += 1;
+            }
+            a.name = name.clone();
+            seen.push(name);
+        }
+    }
+}
+
 /// The whole persisted configuration.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -321,6 +442,8 @@ pub struct Config {
     pub autostart: bool,
     /// Global shortcuts.
     pub hotkeys: HotkeysConfig,
+    /// Read-only mail.
+    pub mail: MailConfig,
 }
 
 impl Config {
@@ -330,6 +453,7 @@ impl Config {
         self.clipboard.clamp();
         self.pomodoro.clamp();
         self.reminders.clamp();
+        self.mail.clamp();
     }
 }
 

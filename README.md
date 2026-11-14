@@ -2,7 +2,8 @@
 
 A small "dynamic island" for the top of your desktop. A pill sits at the top
 edge of the screen. Hover it and it grows into a panel with what's playing,
-your to-dos, clipboard history, a file shelf, a volume mixer and a few tools.
+your to-dos, clipboard history, unread mail, a file shelf, a volume mixer and a
+few tools.
 Move away and it shrinks back.
 
 Written in Rust, with no Electron, no WebView and no background polling. Idle,
@@ -38,7 +39,8 @@ config file.
 | Feature | What it does | Default |
 |---|---|---|
 | **Now playing** | Track, artist, cover art, play/pause/next/previous and a seek bar. Windows: System Media Transport Controls (Spotify, browsers, Media Player...). Linux: MPRIS (Rhythmbox, Firefox, VLC, Spotify...). The collapsed pill shows the track. | on |
-| **Synced lyrics** | Time-synced lyrics from [LRCLIB](https://lrclib.net) for the current track, cached on disk. **The only feature besides dictation that uses the network**, and only after you turn it on. | off |
+| **Synced lyrics** | Time-synced lyrics from [LRCLIB](https://lrclib.net) for the current track, cached on disk. Uses the network, only after you turn it on. | off |
+| **Mail (read-only)** | Unread mail from your IMAP accounts (Gmail, company mail on Spacemail, Yahoo, iCloud, Fastmail, Zoho or any IMAP server): an unread count in the pill, a Mail tab with sender, subject and age, and a notification for new mail. New mail is **pushed** (IMAP IDLE), not polled. Perch opens the inbox read-only and fetches only envelopes, so it **can't mark, move, delete or download** messages. Passwords live in the system keychain (Windows Credential Manager / GNOME Keyring), never in the config file. | off |
 | **To-do** | A short list with optional due times, which raise a notification. | on |
 | **Pomodoro** | 25/5 timer with the countdown in the collapsed pill. | off |
 | **Clipboard history** | Text and images, 50 entries, in memory only. Copies that password managers mark as secret are **never read** (Windows clipboard-exclusion formats; X11 `x-kde-passwordManagerHint`). | off |
@@ -97,6 +99,7 @@ How each claim was checked:
 | Dictation | builds on CI's MSVC runner only; untested here | CI-verified end-to-end (espeak-ng voice → whisper tiny → text) | same | — |
 | Start at login | verified on Windows (HKCU Run) | CI-verified (XDG autostart file) | same | — |
 | Multi-monitor, mixed DPI | placement logic unit-tested with fake monitors; the dev machine has one 1080p monitor | same | same | — |
+| Mail (read-only) | verified on Windows against a real Dovecot server (TLS, Credential Manager, push, nothing marked read); Gmail/Spacemail themselves not signed into by the tests | CI-verified against Dovecot (TLS, STARTTLS, GNOME Keyring, push, read-only, wrong password not retried, add-account dialog typed into) | same | would work (no window) |
 | Installer | verified on Windows (per-user NSIS install/uninstall, portable zip) | CI-verified (`.deb` installs and runs in a clean 22.04 container; `install.sh`) | — | — |
 
 **Wayland:** not supported yet. On a Wayland session Perch runs through
@@ -174,6 +177,9 @@ perch shot                 screenshot
 perch dictate              dictation (perch-speech build)
 perch settings             settings window
 perch reload               re-read the config file
+perch mail-add             open the add-mail-account dialog
+perch mail-retry           reconnect mail accounts (after changing a password)
+perch mail-password Work   store account "Work"'s password (read from stdin) in the keychain
 perch quit
 perch --version | --help
 ```
@@ -210,12 +216,47 @@ screen_time = false
 screenshot = false
 camera_mirror = false
 speech_to_text = false     # perch-speech build; downloads a model once
+mail = false               # network: your IMAP servers, read-only
 
 [hotkeys]
 toggle_notch = "Ctrl+Alt+N"
 screenshot = "Ctrl+Alt+S"
 dictate = "Ctrl+Alt+D"
+
+[mail]
+notify = true              # notification when new mail arrives
+notify_subject = true      # false: sender only (e.g. for shared screens)
+max_items = 10             # unread messages listed per account
+poll_minutes = 5           # only for servers without IMAP IDLE
+
+[[mail.accounts]]          # added for you by "Add mail account…" in settings
+name = "Work"
+username = "you@yourcompany.com"
+host = "mail.spacemail.com"
+port = 993
+security = "tls"           # tls (993), starttls (143), plain (localhost only)
+folder = "INBOX"
+ca_file = ""               # PEM of a private CA, for self-hosted servers
 ```
+
+### Adding a mail account
+
+Turn on **Mail (read-only)** in settings, then click **Add mail account…**.
+Pick the provider (Spacemail, Gmail, Yahoo, iCloud, Fastmail, Zoho or
+Other), type your address and password, and click **Add account**. Perch saves
+the password to the system keychain and the rest to the config. The Mail tab
+then shows "connecting…" and, a moment later, your unread mail. If sign-in
+fails, the tab says so and Perch **stops trying**, so a wrong password can't
+get your account locked. Fix the password with **Remove** and add the account
+again, or with `perch mail-password <name>` followed by `perch mail-retry`.
+
+- **Gmail / Google Workspace:** use an *app password* (Google Account →
+  Security → 2-Step Verification → App passwords). Your normal password won't
+  work over IMAP.
+- **Spacemail (Namecheap):** your mailbox password; server
+  `mail.spacemail.com`, port 993.
+- **Microsoft 365 / Outlook.com:** not supported yet. Microsoft only allows
+  OAuth sign-in for IMAP; see the limitations.
 
 The settings window covers the common options and has a button that opens
 this file. Data lives next to it: `%APPDATA%\perch\data` on Windows,
@@ -225,10 +266,16 @@ this file. Data lives next to it: `%APPDATA%\perch\data` on Windows,
 ## Privacy
 
 - Everything stays on your machine. No telemetry, accounts, analytics or ads.
-- Only two features touch the network, and only after you turn them on:
-  **lyrics** (one request to `lrclib.net` per new track; the result is cached)
-  and **dictation** (a one-time model download from Hugging Face, checked by
-  SHA-256). The settings window marks which features use the network.
+- Only three features touch the network, and only after you turn them on:
+  **lyrics** (one request to `lrclib.net` per new track; the result is
+  cached), **dictation** (a one-time model download from Hugging Face, checked
+  by SHA-256), and **mail** (a TLS connection to each mail server *you* add,
+  nothing else). The settings window marks which features use the network.
+- Mail is read-only by construction: Perch opens the folder with `EXAMINE` and
+  fetches only `UID INTERNALDATE ENVELOPE` for unread messages, never message
+  bodies. Passwords are stored only in the system keychain; the config file
+  holds the server and username. Unencrypted IMAP is refused except to
+  `localhost`.
 - Clipboard history is kept in memory only and cleared when you turn the
   feature off. Copies flagged by password managers are skipped before their
   content is read.
@@ -252,7 +299,8 @@ machines and environments, so they're listed separately.
 | Idle private memory, 7 features on (media, to-do, Pomodoro, clipboard, shelf, reminders, screen time) | ~31 MB | 30-min soak |
 | Idle CPU | 0 % (median 10 s interval ≤ 1 timer tick) | soak |
 | 30-min soak, leak check (machine in use) | PASS: private bytes −0.1 MB, handles +14, GDI/USER flat | `soak-windows.ps1` |
-| `perch.exe` size (all default features) | 8.2 MB | release build, GNU toolchain |
+| Idle private memory, mail on (one account, signed in, idling) | 26.9 MB | `mail-test-windows.ps1` |
+| `perch.exe` size (all default features) | 8.6 MB (mail adds 0.35 MB) | release build, GNU toolchain |
 | Installer / portable zip | 3.2 MB / 4.0 MB | `package-windows.ps1` |
 
 ### Linux (ubuntu-22.04 container: Xvfb + openbox, 8 vCPUs on the same host)
@@ -264,7 +312,8 @@ machines and environments, so they're listed separately.
 | Idle RSS, 7 everyday features | ~34 MB | 30-min soak |
 | Idle CPU | 0 ticks in 10 s | smoke test + soak |
 | 30-min soak, leak check | PASS: RSS +1.1 MB, fds flat, CPU at rest 0 % | `soak-linux.sh` |
-| `perch` binary size / `.deb` | 11.8 MB / 4.2 MB | release build, `cargo deb` |
+| Idle RSS, mail on (three accounts signed in) | ~36 MB | `mail-test.sh` |
+| `perch` binary size / `.deb` | 12.3 MB / 4.2 MB | release build, `cargo deb` |
 | glibc required | 2.34 | `objdump -T` |
 
 Numbers from real Mint hardware will come from `scripts/mint-test.sh`, which
@@ -293,6 +342,21 @@ writes `artifacts/mint/mint-results.md`.
 - **Unsigned builds**: see SmartScreen above.
 - **Camera mirror** wasn't run against the webcam, because that would turn the
   camera on without the owner present.
+- **Mail: no OAuth.** Accounts that only allow OAuth sign-in (Microsoft 365,
+  Outlook.com, and Google accounts without app passwords) don't work yet.
+  Password and app-password sign-in over TLS/STARTTLS does. OAuth needs an
+  app registered with each provider, which this project doesn't have.
+- **Mail: folder names must be ASCII** (e.g. `INBOX`, `Work`), since modified
+  UTF-7 names aren't encoded yet.
+- **Mail: certificates.** Servers need a certificate from a public CA, or a
+  private CA given in `ca_file`. A bare self-signed certificate is refused,
+  as it should be.
+- **Mail on Linux without a keyring:** with no Secret Service running, a
+  password is kept only until Perch exits. Cinnamon runs GNOME Keyring by
+  default.
+- **Mail with real providers** (your Gmail, your Spacemail mailbox) is tested
+  only by you: the automated tests use a local Dovecot server and never sign
+  into real accounts.
 
 ## Build from source
 

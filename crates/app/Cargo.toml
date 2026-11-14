@@ -36,6 +36,10 @@ whisper-rs = { version = "0.16", optional = true }
 cpal = { version = "0.15", optional = true }
 sha2 = { version = "0.10", optional = true }
 nokhwa = { version = "0.10", optional = true, features = ["input-native"] }
+# Read-only mail: IMAP parser + the same rustls/ring/webpki-roots that ureq uses.
+imap-proto = { version = "0.17", optional = true }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = { version = "0.26", optional = true }
 
 [features]
 default = [
@@ -47,6 +51,7 @@ default = [
     "screen-time",
     "screenshot",
     "camera",
+    "mail",
 ]
 # Optional features are compile-time gated as well as config-gated, so a build
 # without them does not contain their code at all.
@@ -59,6 +64,7 @@ white-noise = ["rodio"]
 speech = ["whisper-rs", "cpal", "sha2", "ureq"]
 screenshot = []
 camera = ["nokhwa"]
+mail = ["imap-proto", "rustls", "webpki-roots"]
 # Everything, including the separately shipped dictation build.
 all-features = [
     "media",
@@ -69,6 +75,7 @@ all-features = [
     "white-noise",
     "screenshot",
     "camera",
+    "mail",
     "speech",
 ]
 

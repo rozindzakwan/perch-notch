@@ -534,3 +534,124 @@ fn notification_failure_is_degradable() {
     carry_out(&m.tick(now.plus(Duration::from_secs(61))), &mut fake);
     assert!(matches!(m.collapsed(), CollapsedView::Message(s) if s.contains("water")));
 }
+
+#[cfg(feature = "mail")]
+mod mail {
+    use super::*;
+    use perch_core::config::MailAccount;
+    use perch_core::mail::{AccountStatus, MailItem, MailUpdate};
+
+    fn cfg() -> Config {
+        let mut c = config_all();
+        c.features.mail = true;
+        c.mail.accounts.push(MailAccount {
+            name: "Work".into(),
+            username: "user@example.com".into(),
+            host: "mail.example.com".into(),
+            ..MailAccount::default()
+        });
+        c
+    }
+
+    fn snap(uids: &[u32]) -> MailUpdate {
+        MailUpdate::Snapshot {
+            account: "Work".into(),
+            uid_validity: 1,
+            unread: uids.len() as u32,
+            items: uids
+                .iter()
+                .rev()
+                .map(|u| MailItem {
+                    uid: *u,
+                    from: format!("Sender {u}"),
+                    subject: format!("Subject {u}"),
+                    date_unix: Some(1_700_000_000),
+                })
+                .collect(),
+        }
+    }
+
+    fn notifications(fx: &[Effect]) -> Vec<(String, String)> {
+        fx.iter()
+            .filter_map(|e| match e {
+                Effect::Notify { summary, body } => Some((summary.clone(), body.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_inbox_shows_in_the_tab_and_pill_and_only_new_mail_notifies() {
+        let now = t0();
+        let mut m = Model::new(cfg(), now);
+        assert!(m.tabs().contains(&Tab::Mail));
+        assert!(
+            notifications(&m.mail_update(snap(&[1, 2]))).is_empty(),
+            "startup is quiet"
+        );
+        assert_eq!(m.collapsed(), CollapsedView::Status("2 unread".into()));
+        let fx = m.mail_update(snap(&[1, 2, 3]));
+        assert_eq!(
+            notifications(&fx),
+            vec![("New mail from Sender 3".into(), "Subject 3".into())]
+        );
+        let fx = m.mail_update(snap(&[1, 2, 3, 4, 5]));
+        assert_eq!(notifications(&fx)[0].0, "2 new messages");
+
+        m.action(Action::SelectTab(Tab::Mail), now);
+        let Body::List { rows, .. } = m.view(now).body else {
+            panic!("mail tab is a list")
+        };
+        assert_eq!(rows.len(), 5);
+        assert!(rows[0].text.contains("Sender 5") && rows[0].text.contains("Subject 5"));
+        assert!(
+            rows.iter()
+                .all(|r| r.primary.is_none() && r.remove.is_none()),
+            "read-only rows"
+        );
+    }
+
+    #[test]
+    fn problems_are_listed_and_subjects_can_stay_out_of_notifications() {
+        let now = t0();
+        let mut c = cfg();
+        c.mail.notify_subject = false;
+        let mut m = Model::new(c, now);
+        m.mail_update(MailUpdate::Status {
+            account: "Work".into(),
+            status: AccountStatus::AuthFailed("Invalid credentials".into()),
+        });
+        m.action(Action::SelectTab(Tab::Mail), now);
+        let Body::List { rows, .. } = m.view(now).body else {
+            panic!("mail tab is a list")
+        };
+        assert!(
+            rows[0].dim && rows[0].text.contains("sign-in failed"),
+            "{:?}",
+            rows[0]
+        );
+        m.mail_update(snap(&[1]));
+        let fx = m.mail_update(snap(&[1, 2]));
+        assert_eq!(
+            notifications(&fx),
+            vec![("New mail from Sender 2".into(), String::new())]
+        );
+    }
+
+    #[test]
+    fn turning_mail_off_forgets_everything() {
+        let now = t0();
+        let mut m = Model::new(cfg(), now);
+        m.mail_update(snap(&[1, 2]));
+        let mut c = cfg();
+        c.features.mail = false;
+        m.apply_config(c);
+        assert_eq!(m.mail().total_unread(), 0);
+        assert!(m.mail().accounts().is_empty());
+        assert!(!m.tabs().contains(&Tab::Mail));
+        assert!(
+            m.mail_update(snap(&[1, 2, 3])).is_empty(),
+            "updates are ignored while off"
+        );
+    }
+}

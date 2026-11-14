@@ -12,6 +12,7 @@ pub mod error;
 pub mod geometry;
 pub mod hotkey;
 pub mod lrc;
+pub mod mail;
 pub mod media;
 pub mod noise;
 pub mod notch;

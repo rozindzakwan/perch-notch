@@ -19,7 +19,7 @@ Environments:
 | `cargo fmt --all --check` | Windows, container | clean |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Windows (default features; GNU can't build `speech`) | clean (0 warnings) |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | container | clean (0 warnings) |
-| `cargo test --workspace` | Windows | 295 passed, 0 failed, 5 ignored (opt-in hardware tests, run separately below) |
+| `cargo test --workspace` | Windows | 316 passed, 0 failed, 5 ignored (opt-in hardware tests, run separately below) |
 | `cargo test --workspace --all-features --locked` | container | all passed, 0 failed |
 | `cargo audit` | Windows | 0 vulnerabilities; 7 warnings: 6 unmaintained crates (paste, proc-macro-error, ttf-parser, zbus_names, zvariant, zvariant_derive) and `glib` 0.18 "unsound", which is only in the lockfile through `tray-icon`'s Linux GTK deps and is never compiled (tray-icon is Windows-only here; Linux uses ksni) |
 
@@ -125,7 +125,7 @@ All of it: `scripts/test-installer-windows.ps1`, 11/11 passed.
 
 ## 3. Linux (container)
 
-`scripts/linux-ci.sh all` = `check test build smoke mpris pulse deb debinstall`.
+`scripts/linux-ci.sh all` = `check test build smoke mpris pulse mail deb debinstall`.
 
 ### X11 smoke (`scripts/smoke-x11.sh`): 32/32 passed, without and with picom
 
@@ -173,6 +173,31 @@ itself crashed at the very end because it was edited while running; the CSV
 was complete and re-scored with `--summarize`.) Evidence:
 `artifacts/linux/soak-linux.{csv,md}`.
 
+## 3b. Mail (read-only IMAP)
+
+No test signs into a real account. They run against a scripted in-process
+IMAP server and a throwaway **Dovecot** (the server Spacemail runs) in the
+Linux container.
+
+| Test | Where | Result |
+|---|---|---|
+| core `mail` unit tests: new-mail detection (first snapshot quiet, UIDVALIDITY reset), RFC 2047 subjects (UTF-8 B/Q, Latin-1, adjacent words), base64, sender display, INTERNALDATE, presets | both | 8 passed |
+| `tests/mail_client.rs` (client vs. scripted server): sign-in, EXAMINE, decoded envelopes, **IDLE push**, never `SELECT`/`STORE`/body fetches, wrong password **reported and not retried**, missing password, polling fallback without IDLE, plaintext to a remote host refused | both | 5 passed |
+| `tests/model.rs` mail: tab, "N unread" pill, notifications only for new mail, subject-free notifications, problems listed, turning the feature off clears it | both | 3 passed |
+| forms: add-account dialog round trip, validation, presets fill server/port, masked password field | both | 2 passed (+1 mask test in `perch-ui`) |
+| keychain round trip, Windows Credential Manager (`platform-windows` unit test, throwaway `Perch/test:*` item) | Windows | passed |
+| keychain round trip, Secret Service (`platform-linux --test secrets`, throwaway GNOME Keyring on a private bus) | container | passed |
+| `scripts/mail-test.sh` (Perch release build vs. Dovecot, under Xvfb, password via `perch mail-password` into GNOME Keyring) | container | **17/17**: password in keyring and not in config; online over **TLS** and **STARTTLS** (private CA via `ca_file`); 4 unread listed; `Jürgen - Halo 😀` decoded; new message **pushed in ~620 ms**; **0 of 3 messages `\Seen` on the server**; wrong password reported, exactly one attempt per account; feature off closes all connections; add-account dialog opened with `perch mail-add`, **typed into with xdotool**, account saved, typed password in keyring only, dialog closed, account online; RSS 36 MB |
+| `scripts/mail-test-windows.ps1` (`perch.exe` vs. the same Dovecot on `localhost:1993`) | Windows | **10/10**: password in Credential Manager and not in config; online over TLS; 2 unread; subjects decoded; new message pushed in ~650 ms; 0 of 3 `\Seen`; 26.9 MB private; quits cleanly; test credential removed |
+
+Bugs these runs found (fixed, with tests):
+
+- `perch mail-password` stored a **UTF-8 byte-order mark** as part of the
+  password when it was piped from Windows PowerShell 5.1 (bytes `ef bb bf`
+  read back from Credential Manager), so sign-in failed. The line is now
+  cleaned (`cli::password_from_line`).
+- The masked password field drew `{2022}` instead of `•` (a mangled escape),
+  caught on the dialog screenshot. Now `form::mask`, with a test.
 
 ## 4. How the soak is scored
 

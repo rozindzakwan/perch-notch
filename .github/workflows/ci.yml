@@ -89,10 +89,11 @@ jobs:
             xvfb openbox xdotool x11-utils x11-xserver-utils imagemagick xclip \
             dbus dbus-x11 playerctl picom sway pulseaudio pulseaudio-utils \
             sysstat procps psmisc file dpkg-dev fakeroot tesseract-ocr \
-            jq wmctrl x11-apps stalonetray espeak-ng
+            jq wmctrl x11-apps stalonetray espeak-ng \
+            dovecot-imapd gnome-keyring libsecret-tools openssl
       - name: install cargo-deb
         run: cargo install --locked cargo-deb
-      - name: linux-ci (check, test, build, smoke, mpris, pulse, deb)
+      - name: linux-ci (check, test, build, smoke, mpris, pulse, mail, deb)
         run: scripts/linux-ci.sh all
       - uses: actions/upload-artifact@v4
         if: always()

@@ -17,6 +17,8 @@ pub mod forms;
 pub mod glue;
 pub mod icon;
 pub mod lyrics;
+#[cfg(feature = "mail")]
+pub mod mail;
 pub mod model;
 pub mod persist;
 pub mod shell;

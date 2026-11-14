@@ -105,6 +105,12 @@ pub struct Status {
     pub mixer_sessions: Vec<String>,
     /// Synced lyrics are loaded for the current track.
     pub lyrics_loaded: bool,
+    /// Unread mail across accounts.
+    pub mail_unread: u32,
+    /// Each mail account as "name: state".
+    pub mail_accounts: Vec<String>,
+    /// The newest unread message as "sender - subject".
+    pub mail_latest: String,
 }
 
 /// Write the status file if `$PERCH_STATUS_FILE` is set and it changed.

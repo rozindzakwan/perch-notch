@@ -63,6 +63,16 @@ pub enum UserEvent {
         /// LRC text, `None` if not found.
         lrc: Option<String>,
     },
+    /// The mail client reported something.
+    #[cfg(feature = "mail")]
+    Mail(perch_core::mail::MailUpdate),
+}
+
+/// Which form the dialog window shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DialogKind {
+    Todo,
+    Mail,
 }
 
 /// The application.
@@ -84,6 +94,11 @@ pub struct Shell {
     settings: Option<FormWindow>,
     dialog: Option<FormWindow>,
     dialog_error: Option<String>,
+    dialog_kind: DialogKind,
+    #[cfg(feature = "mail")]
+    mail: crate::mail::MailHub,
+    #[cfg(feature = "mail")]
+    secrets: Option<std::sync::Arc<dyn perch_core::platform::SecretStore>>,
     shot: Option<perch_ui::shot::ShotWindow>,
     mirror: Option<perch_ui::mirror::MirrorWindow>,
     #[cfg(feature = "camera")]
@@ -143,6 +158,11 @@ impl Shell {
             settings: None,
             dialog: None,
             dialog_error: None,
+            dialog_kind: DialogKind::Todo,
+            #[cfg(feature = "mail")]
+            mail: Default::default(),
+            #[cfg(feature = "mail")]
+            secrets: None,
             shot: None,
             mirror: None,
             #[cfg(feature = "camera")]
@@ -328,6 +348,21 @@ impl Shell {
                 .map(|s| s.name.clone())
                 .collect(),
             lyrics_loaded: self.model.has_lyrics(),
+            mail_unread: self.model.mail().total_unread(),
+            mail_accounts: self
+                .model
+                .mail()
+                .accounts()
+                .iter()
+                .map(|a| format!("{}: {}", a.name, a.status.label()))
+                .collect(),
+            mail_latest: self
+                .model
+                .mail()
+                .items()
+                .first()
+                .map(|(_, m)| format!("{} - {}", m.from, m.subject))
+                .unwrap_or_default(),
             state: format!("{:?}", self.notch.state()),
             pill,
             visible,
@@ -380,6 +415,7 @@ impl Shell {
         let old = self.model.config().clone();
         let fx = self.model.apply_config(cfg.clone());
         self.services.apply_features(self.model.features());
+        self.sync_mail();
         self.load_usage_once();
         if old.hotkeys != cfg.hotkeys || old.features != cfg.features {
             self.sync_hotkeys();
@@ -616,8 +652,161 @@ impl Shell {
         }
         self.dialog_error = None;
         match FormWindow::open(el, forms::todo_spec(), self.palette()) {
-            Ok(w) => self.dialog = Some(w),
+            Ok(w) => {
+                self.dialog = Some(w);
+                self.dialog_kind = DialogKind::Todo;
+            }
             Err(e) => log::warn!("cannot open the to-do dialog: {e}"),
+        }
+    }
+
+    /// Start or stop mail watchers so they match the config.
+    fn sync_mail(&mut self) {
+        #[cfg(feature = "mail")]
+        {
+            let active = self.model.is_active(Feature::Mail);
+            if !active && self.mail.is_empty() {
+                return; // nothing running, and no keychain needed
+            }
+            let secrets = self.secrets();
+            let report = self.mail_report();
+            let cfg = self.model.config().mail.clone();
+            self.mail.sync(&cfg, active, &secrets, &report);
+        }
+    }
+
+    #[cfg(feature = "mail")]
+    fn secrets(&mut self) -> std::sync::Arc<dyn perch_core::platform::SecretStore> {
+        self.secrets
+            .get_or_insert_with(crate::backends::secrets)
+            .clone()
+    }
+
+    #[cfg(feature = "mail")]
+    fn mail_report(&self) -> crate::mail::Report {
+        let proxy = std::sync::Mutex::new(self.proxy.clone());
+        std::sync::Arc::new(move |u| {
+            if let Ok(p) = proxy.lock() {
+                let _ = p.send_event(UserEvent::Mail(u));
+            }
+        })
+    }
+
+    /// Reconnect every mail account (`perch mail-retry`, or after storing a
+    /// new password).
+    fn retry_mail(&mut self) {
+        #[cfg(feature = "mail")]
+        {
+            self.mail = Default::default();
+            self.sync_mail();
+        }
+    }
+
+    fn open_mail_dialog(
+        &mut self,
+        el: &ActiveEventLoop,
+        form: &forms::MailForm,
+        error: Option<&str>,
+    ) {
+        let spec = forms::mail_account_spec(form, error);
+        if self.dialog_kind == DialogKind::Mail {
+            if let Some(d) = &mut self.dialog {
+                d.replace(spec);
+                d.focus();
+                return;
+            }
+        }
+        self.dialog = None;
+        match FormWindow::open(el, spec, self.palette()) {
+            Ok(w) => {
+                self.dialog = Some(w);
+                self.dialog_kind = DialogKind::Mail;
+            }
+            Err(e) => log::warn!("cannot open the mail dialog: {e}"),
+        }
+    }
+
+    fn remove_mail_account(&mut self, index: usize) {
+        let mut cfg = self.model.config().clone();
+        if index >= cfg.mail.accounts.len() {
+            return;
+        }
+        let account = cfg.mail.accounts.remove(index);
+        #[cfg(feature = "mail")]
+        if let Err(e) = self.secrets().delete(&account.secret_key()) {
+            log::warn!("removing the stored mail password: {e}");
+        }
+        self.save_config(&cfg);
+        self.apply_config(cfg);
+        self.model
+            .flash(format!("Removed {}", account.name), Now::real());
+        self.request_redraw();
+    }
+
+    fn handle_mail_dialog_event(&mut self, el: &ActiveEventLoop, event: &WindowEvent) {
+        let Some(win) = &mut self.dialog else { return };
+        let events = win.handle(event);
+        let form = forms::MailForm::from_spec(win.state().spec());
+        for ev in events {
+            match ev {
+                perch_ui::form::FormEvent::Chosen(id, i) if id == "provider" => {
+                    let f = form.clone().with_preset(i);
+                    if let Some(w) = &mut self.dialog {
+                        w.replace(forms::mail_account_spec(&f, None));
+                    }
+                }
+                perch_ui::form::FormEvent::Button(id) if id == "add" => {
+                    let parsed = forms::parse_mail_form(&form, &self.model.config().mail.accounts);
+                    match parsed {
+                        Ok((account, password)) => match self.save_mail_account(account, &password)
+                        {
+                            Ok(()) => {
+                                self.dialog = None;
+                                crate::sys::trim_heap();
+                                return;
+                            }
+                            Err(msg) => self.open_mail_dialog(el, &form, Some(&msg)),
+                        },
+                        Err(msg) => self.open_mail_dialog(el, &form, Some(&msg)),
+                    }
+                }
+                perch_ui::form::FormEvent::Button(_) | perch_ui::form::FormEvent::Closed => {
+                    self.dialog = None;
+                    crate::sys::trim_heap();
+                    return;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Store the password in the keychain, then add the account (and turn the
+    /// feature on) in the config.
+    fn save_mail_account(
+        &mut self,
+        account: perch_core::config::MailAccount,
+        password: &str,
+    ) -> std::result::Result<(), String> {
+        #[cfg(feature = "mail")]
+        {
+            let label = format!("Perch mail: {}", account.username);
+            self.secrets()
+                .set(&account.secret_key(), &label, password)
+                .map_err(|e| format!("could not save the password: {e}"))?;
+            let mut cfg = self.model.config().clone();
+            let name = account.name.clone();
+            cfg.mail.accounts.push(account);
+            cfg.features.mail = true;
+            self.save_config(&cfg);
+            self.apply_config(cfg);
+            self.model.flash(format!("Added {name}"), Now::real());
+            self.request_redraw();
+            Ok(())
+        }
+        #[cfg(not(feature = "mail"))]
+        {
+            let _ = (account, password);
+            Err("this build has no mail support".into())
         }
     }
 
@@ -632,6 +821,8 @@ impl Shell {
         log::debug!("command: {verb:?}");
         let now = Now::real();
         match verb.trim() {
+            "mail-retry" => self.retry_mail(),
+            "mail-add" => self.open_mail_dialog(el, &forms::MailForm::default(), None),
             "autostart-toggle" => {
                 let mut cfg = self.model.config().clone();
                 cfg.autostart = !cfg.autostart;
@@ -743,7 +934,7 @@ impl Shell {
             match forms::apply_settings_event(self.model.config(), &monitors, &ev) {
                 SettingsOutcome::Changed(cfg) => {
                     self.save_config(&cfg);
-                    self.apply_config(cfg);
+                    self.apply_config(*cfg);
                 }
                 SettingsOutcome::OpenConfig => {
                     let path = self.store.path().to_path_buf();
@@ -760,6 +951,10 @@ impl Shell {
                     crate::sys::trim_heap();
                     return;
                 }
+                SettingsOutcome::AddMailAccount => {
+                    self.open_mail_dialog(el, &forms::MailForm::default(), None);
+                }
+                SettingsOutcome::RemoveMailAccount(i) => self.remove_mail_account(i),
                 SettingsOutcome::None => {}
             }
         }
@@ -900,6 +1095,10 @@ impl Shell {
     }
 
     fn handle_dialog_event(&mut self, el: &ActiveEventLoop, event: &WindowEvent) {
+        if self.dialog_kind == DialogKind::Mail {
+            self.handle_mail_dialog_event(el, event);
+            return;
+        }
         let Some(win) = &mut self.dialog else { return };
         let events = win.handle(event);
         let text = win.state().text("text").unwrap_or_default().to_string();
@@ -997,6 +1196,7 @@ impl ApplicationHandler<UserEvent> for Shell {
             self.services.track_notch_windows(&[pill, hot]);
         }
         self.services.apply_features(self.model.features());
+        self.sync_mail();
         self.load_usage_once();
         self.sync_hotkeys();
         self.services.start_tray(self.config().autostart);
@@ -1067,6 +1267,11 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
             UserEvent::Lyrics { key, lrc } => {
                 let fx = self.model.lyrics_loaded(&key, lrc.as_deref());
+                self.run_effects(el, fx);
+            }
+            #[cfg(feature = "mail")]
+            UserEvent::Mail(update) => {
+                let fx = self.model.mail_update(update);
                 self.run_effects(el, fx);
             }
         }

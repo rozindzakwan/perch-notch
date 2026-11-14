@@ -61,6 +61,8 @@ pub enum Field {
         value: String,
         /// Shown when empty.
         placeholder: String,
+        /// Mask the value (passwords): drawn as bullets, never as text.
+        secret: bool,
     },
     /// A row of buttons `(id, label)`; the first is the primary action.
     Buttons(Vec<(String, String)>),
@@ -420,6 +422,7 @@ impl FormState {
                     label,
                     value,
                     placeholder,
+                    secret,
                     ..
                 } => {
                     draw_text(
@@ -450,6 +453,8 @@ impl FormState {
                     );
                     let (shown, color) = if value.is_empty() {
                         (placeholder.clone(), pal.muted)
+                    } else if *secret {
+                        (mask(value), pal.fg)
                     } else {
                         (value.clone(), pal.fg)
                     };
@@ -779,5 +784,22 @@ impl FormWindow {
         if let Err(e) = buffer.present() {
             log::warn!("presenting the form: {e}");
         }
+    }
+}
+
+/// What a secret field shows instead of its value: one bullet per character.
+pub fn mask(value: &str) -> String {
+    "\u{2022}".repeat(value.chars().count())
+}
+
+#[cfg(test)]
+mod mask_tests {
+    use super::mask;
+
+    #[test]
+    fn secrets_become_bullets_one_per_character() {
+        assert_eq!(mask("pä55"), "\u{2022}\u{2022}\u{2022}\u{2022}");
+        assert_eq!(mask(""), "");
+        assert!(!mask("hunter2").contains("hunter2"));
     }
 }

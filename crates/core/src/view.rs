@@ -31,6 +31,8 @@ pub enum Tab {
     Time,
     /// Screenshot / camera / dictation.
     Tools,
+    /// Unread mail (read-only).
+    Mail,
 }
 
 impl Tab {
@@ -45,6 +47,7 @@ impl Tab {
             Tab::Sounds => "Sounds",
             Tab::Time => "Time",
             Tab::Tools => "Tools",
+            Tab::Mail => "Mail",
         }
     }
 }

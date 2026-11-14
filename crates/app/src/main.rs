@@ -89,6 +89,10 @@ fn main() -> ExitCode {
 
     let mut instance = new_single_instance();
 
+    if let Command::MailPassword(name) = &invocation.command {
+        return store_mail_password(&store, name, &mut instance);
+    }
+
     // A forwardable verb goes to the running instance; if there is none, the
     // user gets a clear message rather than a second notch.
     if let Some(verb) = invocation.command.ipc_verb() {
@@ -219,4 +223,58 @@ fn serve_ipc(
     sink: EventSink,
 ) -> perch_core::Result<()> {
     instance.serve(sink)
+}
+
+/// `perch mail-password <ACCOUNT>`: read one line from stdin and store it in
+/// the system keychain for that account, then ask a running Perch to
+/// reconnect. The password is never echoed or logged.
+fn store_mail_password(
+    store: &ConfigStore,
+    name: &str,
+    instance: &mut dyn SingleInstance,
+) -> ExitCode {
+    #[cfg(feature = "mail")]
+    {
+        let (cfg, _) = store.load_or_default();
+        let Some(account) = cfg
+            .mail
+            .accounts
+            .iter()
+            .find(|a| a.name == name || a.username.eq_ignore_ascii_case(name))
+        else {
+            eprintln!(
+                "perch: no mail account named {name:?} in {}",
+                store.path().display()
+            );
+            return ExitCode::FAILURE;
+        };
+        let mut line = String::new();
+        if std::io::stdin().read_line(&mut line).is_err() {
+            eprintln!("perch: could not read the password from stdin");
+            return ExitCode::FAILURE;
+        }
+        let password = cli::password_from_line(&line);
+        if password.is_empty() {
+            eprintln!("perch: empty password; nothing stored");
+            return ExitCode::FAILURE;
+        }
+        let label = format!("Perch mail: {}", account.username);
+        if let Err(e) = perch_app::backends::secrets().set(&account.secret_key(), &label, password)
+        {
+            eprintln!("perch: storing the password failed: {e}");
+            return ExitCode::FAILURE;
+        }
+        println!(
+            "Stored the password for {} in the system keychain.",
+            account.name
+        );
+        let _ = instance.forward("mail-retry");
+        ExitCode::SUCCESS
+    }
+    #[cfg(not(feature = "mail"))]
+    {
+        let _ = (store, name, instance);
+        eprintln!("perch: this build has no mail support");
+        ExitCode::FAILURE
+    }
 }

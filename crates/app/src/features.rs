@@ -38,6 +38,8 @@ pub enum Feature {
     Screenshot,
     /// Camera mirror.
     CameraMirror,
+    /// Read-only mail summary (network, opt-in).
+    Mail,
 }
 
 impl Feature {
@@ -56,6 +58,7 @@ impl Feature {
         Feature::SpeechToText,
         Feature::Screenshot,
         Feature::CameraMirror,
+        Feature::Mail,
     ];
 
     /// Label for the tray menu and the settings window.
@@ -74,13 +77,17 @@ impl Feature {
             Feature::SpeechToText => "Dictation",
             Feature::Screenshot => "Screenshot",
             Feature::CameraMirror => "Camera mirror",
+            Feature::Mail => "Mail (read-only)",
         }
     }
 
     /// Whether the feature uses the network at all, so the settings window can
-    /// mark it clearly. Only lyrics and the speech model download do.
+    /// mark it clearly: lyrics, the speech model download and mail.
     pub fn uses_network(&self) -> bool {
-        matches!(self, Feature::Lyrics | Feature::SpeechToText)
+        matches!(
+            self,
+            Feature::Lyrics | Feature::SpeechToText | Feature::Mail
+        )
     }
 
     /// Whether this feature was compiled into the binary. A feature can be
@@ -99,6 +106,7 @@ impl Feature {
             Feature::SpeechToText => cfg!(feature = "speech"),
             Feature::Screenshot => cfg!(feature = "screenshot"),
             Feature::CameraMirror => cfg!(feature = "camera"),
+            Feature::Mail => cfg!(feature = "mail"),
             // The mixer needs no extra crates on either OS.
             Feature::VolumeMixer => true,
         }
@@ -121,6 +129,7 @@ impl Feature {
             Feature::SpeechToText => f.speech_to_text,
             Feature::Screenshot => f.screenshot,
             Feature::CameraMirror => f.camera_mirror,
+            Feature::Mail => f.mail,
         }
     }
 }

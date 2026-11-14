@@ -149,6 +149,40 @@ pub trait AudioMixer {
     fn set_mute(&mut self, id: &str, muted: bool) -> Result<()>;
 }
 
+/// The OS keychain (Windows Credential Manager, Linux Secret Service). Used
+/// for mail passwords so they never sit in the config file.
+pub trait SecretStore: Send + Sync {
+    /// The secret stored under `key`, if any.
+    fn get(&self, key: &str) -> Result<Option<String>>;
+    /// Store (or replace) a secret. `label` is what keychain UIs show.
+    fn set(&self, key: &str, label: &str, secret: &str) -> Result<()>;
+    /// Remove a secret (missing is fine).
+    fn delete(&self, key: &str) -> Result<()>;
+}
+
+/// A [`SecretStore`] that keeps secrets in memory only (tests, or when no
+/// keychain is available: the password then lasts until Perch exits).
+#[derive(Debug, Default)]
+pub struct MemorySecrets(std::sync::Mutex<std::collections::HashMap<String, String>>);
+
+impl SecretStore for MemorySecrets {
+    fn get(&self, key: &str) -> Result<Option<String>> {
+        Ok(self.0.lock().ok().and_then(|m| m.get(key).cloned()))
+    }
+    fn set(&self, key: &str, _label: &str, secret: &str) -> Result<()> {
+        if let Ok(mut m) = self.0.lock() {
+            m.insert(key.to_string(), secret.to_string());
+        }
+        Ok(())
+    }
+    fn delete(&self, key: &str) -> Result<()> {
+        if let Ok(mut m) = self.0.lock() {
+            m.remove(key);
+        }
+        Ok(())
+    }
+}
+
 /// Reading and writing the system clipboard.
 pub trait ClipboardAccess {
     /// Read the current clipboard content plus the flags (password-manager

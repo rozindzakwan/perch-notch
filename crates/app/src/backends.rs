@@ -46,3 +46,23 @@ pub fn mixer(sink: EventSink) -> Result<Box<dyn AudioMixer>> {
         Err(Error::unavailable("mixer", "no backend for this OS"))
     }
 }
+
+/// The system keychain for mail passwords. Without one (no Secret Service on
+/// Linux), passwords are kept in memory until Perch exits.
+#[cfg(feature = "mail")]
+pub fn secrets() -> std::sync::Arc<dyn perch_core::platform::SecretStore> {
+    #[cfg(windows)]
+    {
+        std::sync::Arc::new(perch_platform_windows::secrets::WindowsCredentials)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        match perch_platform_linux::secrets::SecretService::connect() {
+            Ok(s) => std::sync::Arc::new(s),
+            Err(e) => {
+                log::warn!("no keyring ({e}); mail passwords are kept until Perch exits");
+                std::sync::Arc::new(perch_core::platform::MemorySecrets::default())
+            }
+        }
+    }
+}

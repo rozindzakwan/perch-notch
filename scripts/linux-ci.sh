@@ -6,8 +6,8 @@
 # container run means the same thing as a green CI run.
 #
 # Usage: scripts/linux-ci.sh [stage...]
-#   stages: check test build smoke mpris pulse deb debinstall soak all
-#   (default: all = check test build smoke mpris pulse deb debinstall)
+#   stages: check test build smoke mpris pulse mail deb debinstall soak all
+#   (default: all = check test build smoke mpris pulse mail deb debinstall)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -70,6 +70,18 @@ stage_pulse() {
     scripts/pulse-test.sh
 }
 
+stage_mail() {
+    say "mail: keyring round trip and a real IMAP server (Dovecot), read-only checks"
+    dbus-run-session -- bash -c '
+        export HOME=$(mktemp -d) XDG_DATA_HOME=$(mktemp -d)
+        echo -n ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1
+        cargo test -p perch-platform-linux --all-features --locked --test secrets -- --ignored
+    '
+    local sudo=""
+    [ "$(id -u)" -ne 0 ] && sudo="sudo -E env PATH=$PATH"
+    $sudo dbus-run-session -- env PERCH_BIN="$(target_dir)/release/perch" scripts/mail-test.sh --out "$OUT"
+}
+
 stage_deb() {
     say "cargo deb"
     cargo deb -p perch --no-build --locked -o "$OUT/"
@@ -109,7 +121,7 @@ stage_soak() {
 
 stages=("$@")
 if [ ${#stages[@]} -eq 0 ] || [ "${stages[0]}" = all ]; then
-    stages=(check test build smoke mpris pulse deb debinstall)
+    stages=(check test build smoke mpris pulse mail deb debinstall)
 fi
 
 for s in "${stages[@]}"; do

@@ -32,6 +32,12 @@ pub enum Command {
     Media(String),
     /// Switch the expanded notch to a tab.
     Tab(String),
+    /// Reconnect every mail account (e.g. after a password change).
+    MailRetry,
+    /// Open the add-mail-account dialog.
+    MailAdd,
+    /// Store a mail account's password (read from stdin) in the keychain.
+    MailPassword(String),
     /// Print version information and exit.
     Version,
     /// Print usage and exit.
@@ -51,11 +57,13 @@ impl Command {
             Command::Quit => s("quit"),
             Command::Pin => s("pin"),
             Command::Reload => s("reload"),
+            Command::MailRetry => s("mail-retry"),
+            Command::MailAdd => s("mail-add"),
             // Newlines would split one command into several on the wire.
             Command::Todo(t) => Some(format!("todo {}", t.replace(['\n', '\r'], " "))),
             Command::Media(v) => Some(v.clone()),
             Command::Tab(t) => Some(format!("tab {t}")),
-            Command::Run | Command::Version | Command::Help => None,
+            Command::Run | Command::Version | Command::Help | Command::MailPassword(_) => None,
         }
     }
 }
@@ -97,6 +105,19 @@ where
             "quit" | "exit" => command = command.or(Some(Command::Quit)),
             "pin" => command = command.or(Some(Command::Pin)),
             "reload" => command = command.or(Some(Command::Reload)),
+            "mail-retry" => command = command.or(Some(Command::MailRetry)),
+            "mail-add" => command = command.or(Some(Command::MailAdd)),
+            "mail-password" if command.is_none() => {
+                let name = iter
+                    .next()
+                    .map(|n| n.as_ref().to_string())
+                    .unwrap_or_default();
+                if name.trim().is_empty() {
+                    unknown.push("mail-password (missing account name)".into());
+                } else {
+                    command = Some(Command::MailPassword(name));
+                }
+            }
             "play-pause" | "next" | "previous" => {
                 command = command.or(Some(Command::Media(arg.to_string())))
             }
@@ -165,8 +186,13 @@ pub fn usage() -> String {
          \u{20}   todo <TEXT>     Add a to-do item\n\
          \u{20}   play-pause, next, previous\n\
          \u{20}                   Control the current media player\n\
-         \u{20}   tab <NAME>      Open a tab: music tasks clips shelf mixer sounds time tools\n\
+         \u{20}   tab <NAME>      Open a tab: music tasks clips shelf mixer sounds time tools mail\n\
          \u{20}   reload          Re-read the config file\n\
+         \u{20}   mail-add        Open the add-mail-account dialog\n\
+         \u{20}   mail-retry      Reconnect mail accounts (e.g. after a password change)\n\
+         \u{20}   mail-password <ACCOUNT>\n\
+         \u{20}                   Store that mail account's password (read from stdin)\n\
+         \u{20}                   in the system keychain\n\
          \n\
          OPTIONS:\n\
          \u{20}   --config <PATH> Use a specific config file\n\
@@ -179,4 +205,28 @@ pub fn usage() -> String {
         name = perch_core::APP_NAME,
         version = env!("CARGO_PKG_VERSION"),
     )
+}
+
+/// The password line read by `perch mail-password`: without the trailing
+/// newline, and without the UTF-8 byte-order mark that Windows PowerShell puts
+/// in front of text piped to a program (it would otherwise become part of the
+/// stored password).
+pub fn password_from_line(line: &str) -> &str {
+    line.trim_start_matches('\u{feff}')
+        .trim_end_matches(['\r', '\n'])
+}
+
+#[cfg(test)]
+mod password_line_tests {
+    use super::password_from_line;
+
+    #[test]
+    fn strips_bom_and_newline_but_keeps_spaces() {
+        assert_eq!(
+            password_from_line("\u{feff}correct horse\r\n"),
+            "correct horse"
+        );
+        assert_eq!(password_from_line("  spaced pw \n"), "  spaced pw ");
+        assert_eq!(password_from_line("plain"), "plain");
+    }
 }

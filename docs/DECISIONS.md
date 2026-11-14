@@ -273,3 +273,34 @@ clipboard (`text/uri-list` via `arboard`), which file managers paste.
   `turning_lyrics_on_mid_song_fetches_them_for_the_current_track`.
 - The status file now reports `mixer_sessions` and `lyrics_loaded`, so both
   features can be checked end to end without screenshots.
+
+## ADR-017: Read-only mail over IMAP
+
+- **Protocol.** IMAP over TLS (or STARTTLS), because every mainstream
+  provider and company server speaks it with password or app-password
+  sign-in. Provider REST APIs (Gmail API, Microsoft Graph) would need OAuth
+  app registrations and per-provider code.
+- **Read-only by construction.** `EXAMINE` (the server enforces read-only for
+  the session), `UID SEARCH UNSEEN`, and `UID FETCH (UID INTERNALDATE
+  ENVELOPE)` for the newest few. No `SELECT`, `STORE`, or body fetches, which
+  the scripted-server test asserts and the Dovecot test confirms on the server
+  side (0 messages `\Seen`).
+- **Event-driven.** One thread per account, blocked in IMAP IDLE (re-issued
+  every 25 min per RFC 2177). A check every `poll_minutes` only for servers
+  without IDLE. Reconnects back off 5 s → 5 min. A rejected sign-in stops the
+  thread until the password or the settings change, because retrying could
+  lock the account.
+- **Small footprint.** Own ~700-line client on `imap-proto` (parser only),
+  reusing the rustls/ring/webpki-roots that `ureq` already brings, so no
+  OpenSSL and no async runtime. +0.35 MB on Windows, +0.58 MB on Linux.
+- **Secrets.** Passwords only in the OS keychain: Credential Manager
+  (generic credential `Perch/mail:<user>@<host>`, local machine persistence)
+  and the Secret Service (`application=perch`, `perch-key=...`) over the zbus
+  already used for MPRIS. Read on the account's own thread, never logged.
+  Without a Secret Service, kept in memory until exit.
+- **No OAuth (yet).** Microsoft 365/Outlook.com require it. It needs an app
+  registration per provider and a browser sign-in flow; documented as a
+  limitation.
+- **Presets.** Spacemail (the user's company mail, confirmed from the
+  domain's MX records and the server's IMAP greeting: Dovecot with IDLE and
+  AUTH=PLAIN), Gmail, Yahoo, iCloud, Fastmail, Zoho, Other.
