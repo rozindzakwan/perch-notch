@@ -1,0 +1,100 @@
+<h2>Which direction feels right for Perch?</h2>
+<p class="subtitle">Same content in three styles: the collapsed pill, a new-mail notification, and the Mail list. Everything here can be drawn by Perch itself (no web view), with smooth motion between states.</p>
+
+<style>
+  .stage { background: linear-gradient(135deg,#3a4a6b 0%,#6b4a5e 50%,#2f5d62 100%); border-radius: 14px; padding: 18px 14px 22px; display:flex; flex-direction:column; align-items:center; gap:14px; min-height: 520px; }
+  .lbl { font: 600 10px/1 system-ui; letter-spacing:.08em; text-transform:uppercase; color: rgba(255,255,255,.7); align-self:flex-start; margin-left:4px }
+  /* ---------- A: Glass ---------- */
+  .a-pill { display:flex; align-items:center; gap:8px; padding:7px 12px 7px 8px; border-radius:999px; background: rgba(20,22,30,.55); backdrop-filter: blur(18px); border:1px solid rgba(255,255,255,.18); box-shadow: 0 8px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.15); color:#fff; font: 600 12px system-ui }
+  .a-art { width:20px; height:20px; border-radius:6px; background: linear-gradient(135deg,#ff7a59,#c4317a) }
+  .a-eq span { display:inline-block; width:3px; margin-right:2px; border-radius:2px; background:#ff9d7a }
+  .a-badge { margin-left:4px; padding:2px 7px; border-radius:999px; background:rgba(120,170,255,.25); color:#bcd4ff; font-size:11px }
+  .a-toast { width:300px; display:flex; gap:10px; align-items:center; padding:10px 12px; border-radius:22px; background: rgba(20,22,30,.55); backdrop-filter: blur(18px); border:1px solid rgba(255,255,255,.18); box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.15); color:#fff; font: 12px system-ui }
+  .a-ava { width:32px; height:32px; border-radius:50%; display:grid; place-items:center; font:700 13px system-ui; color:#fff; background: linear-gradient(135deg,#5b8cff,#8a5bff); flex:none }
+  .a-panel { width:320px; border-radius:26px; background: rgba(18,20,28,.6); backdrop-filter: blur(22px); border:1px solid rgba(255,255,255,.16); box-shadow: 0 18px 40px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.14); color:#fff; font: 12px system-ui; padding:12px }
+  .a-tabs { display:flex; gap:4px; padding:3px; border-radius:999px; background: rgba(255,255,255,.08); margin-bottom:10px }
+  .a-tabs span { flex:1; text-align:center; padding:5px 0; border-radius:999px; color:rgba(255,255,255,.6); font-size:13px }
+  .a-tabs .on { background: rgba(255,255,255,.18); color:#fff }
+  .a-row { display:flex; gap:10px; align-items:center; padding:7px 6px; border-radius:14px }
+  .a-row:hover, .a-row.h { background: rgba(255,255,255,.08) }
+  .muted { opacity:.6 }
+  /* ---------- B: Solid island ---------- */
+  .b-pill { display:flex; align-items:center; gap:10px; padding:6px 14px 6px 6px; border-radius:999px; background:#000; color:#fff; font: 600 12px system-ui; box-shadow: 0 4px 14px rgba(0,0,0,.45) }
+  .b-art { width:22px; height:22px; border-radius:50%; background: linear-gradient(135deg,#ff7a59,#c4317a) }
+  .b-eq span { display:inline-block; width:3px; margin-right:2px; border-radius:2px; background:#30d158 }
+  .b-dot { width:7px; height:7px; border-radius:50%; background:#0a84ff; display:inline-block; margin-right:4px }
+  .b-toast { width:300px; display:flex; gap:12px; align-items:center; padding:12px 14px; border-radius:30px; background:#000; color:#fff; font: 12px system-ui; box-shadow: 0 6px 20px rgba(0,0,0,.5) }
+  .b-ico { width:34px; height:34px; border-radius:50%; display:grid; place-items:center; background:#0a84ff; color:#fff; font: 700 15px system-ui; flex:none }
+  .b-panel { width:320px; border-radius:34px; background:#000; color:#fff; font: 12px system-ui; padding:14px 14px 10px; box-shadow: 0 10px 30px rgba(0,0,0,.5) }
+  .b-row { display:flex; justify-content:space-between; gap:10px; padding:8px 4px; border-bottom:1px solid #1c1c1e }
+  .b-dock { display:flex; justify-content:space-around; margin-top:8px; padding-top:6px }
+  .b-dock span { width:30px; height:30px; border-radius:50%; display:grid; place-items:center; color:#8e8e93; font-size:14px }
+  .b-dock .on { background:#1c1c1e; color:#fff }
+  /* ---------- C: Soft cards ---------- */
+  .c-pill { display:flex; align-items:center; gap:8px; padding:7px 12px; border-radius:16px; background:#1e2028; color:#e9eaf0; font: 600 12px system-ui; border:1px solid #2c2f3a; box-shadow: 0 8px 20px rgba(0,0,0,.35) }
+  .c-chip { padding:2px 8px; border-radius:8px; background:#2a2d38; font-size:11px }
+  .c-toast { width:300px; padding:12px; border-radius:18px; background:#1e2028; border:1px solid #2c2f3a; color:#e9eaf0; font: 12px system-ui; box-shadow: 0 12px 28px rgba(0,0,0,.4) }
+  .c-panel { width:320px; border-radius:22px; background:#16181f; border:1px solid #2a2d38; color:#e9eaf0; font: 12px system-ui; padding:12px; box-shadow: 0 16px 36px rgba(0,0,0,.45) }
+  .c-tabs { display:flex; gap:6px; margin-bottom:10px }
+  .c-tabs span { padding:6px 10px; border-radius:10px; background:#1e2028; color:#9aa0b0 }
+  .c-tabs .on { background:#2b3350; color:#c9d6ff }
+  .c-card { display:flex; gap:10px; align-items:center; padding:9px; margin-bottom:6px; border-radius:14px; background:#1e2028; border:1px solid #262935 }
+  .c-sq { width:30px; height:30px; border-radius:10px; display:grid; place-items:center; font:700 12px system-ui; flex:none }
+</style>
+
+<div class="cards">
+  <!-- A -->
+  <div class="card" data-choice="glass" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="stage">
+      <div class="lbl">Pill</div>
+      <div class="a-pill"><div class="a-art"></div><span class="a-eq"><span style="height:6px"></span><span style="height:11px"></span><span style="height:8px"></span></span>Die For You<span class="a-badge">✉ 3</span></div>
+      <div class="lbl">Notification</div>
+      <div class="a-toast"><div class="a-ava">BB</div><div style="flex:1"><div style="font-weight:600">Build Bot</div><div class="muted">Nightly build passed</div></div><div class="muted" style="font-size:11px">now</div></div>
+      <div class="lbl">Mail tab</div>
+      <div class="a-panel">
+        <div class="a-tabs"><span>♫</span><span>☑</span><span class="on">✉</span><span>⧉</span><span>⚙</span></div>
+        <div class="a-row h"><div class="a-ava" style="width:28px;height:28px;font-size:11px">AL</div><div style="flex:1;min-width:0"><div style="font-weight:600">Ann Lee</div><div class="muted" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Quarterly report</div></div><div class="muted" style="font-size:11px">2m</div></div>
+        <div class="a-row"><div class="a-ava" style="width:28px;height:28px;font-size:11px;background:linear-gradient(135deg,#2bc48a,#1b8f9e)">JM</div><div style="flex:1"><div style="font-weight:600">Jürgen M.</div><div class="muted">Halo 😀</div></div><div class="muted" style="font-size:11px">14m</div></div>
+        <div class="a-row"><div class="a-ava" style="width:28px;height:28px;font-size:11px;background:linear-gradient(135deg,#f5a524,#e2553b)">CI</div><div style="flex:1"><div style="font-weight:600">Build Bot</div><div class="muted">Nightly build passed</div></div><div class="muted" style="font-size:11px">1h</div></div>
+      </div>
+    </div></div>
+    <div class="card-body"><h3>A · Glass</h3><p>Translucent, frosted look with soft light edges; colours pick up the album art. Segmented icon tabs, round avatars. Most "premium"; the frosted blur behind it is real on Windows 11, a tinted translucent fill elsewhere.</p></div>
+  </div>
+
+  <!-- B -->
+  <div class="card" data-choice="island" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="stage">
+      <div class="lbl">Pill</div>
+      <div class="b-pill"><div class="b-art"></div><span>Die For You</span><span class="b-eq"><span style="height:6px"></span><span style="height:11px"></span><span style="height:8px"></span></span><span><span class="b-dot"></span>3</span></div>
+      <div class="lbl">Notification</div>
+      <div class="b-toast"><div class="b-ico">✉</div><div style="flex:1"><div style="font-weight:600">Build Bot</div><div style="color:#8e8e93">Nightly build passed</div></div></div>
+      <div class="lbl">Mail tab</div>
+      <div class="b-panel">
+        <div style="font:700 15px system-ui;margin:0 4px 6px">Mail <span style="color:#0a84ff">· 3</span></div>
+        <div class="b-row"><div><div style="font-weight:600">Ann Lee</div><div style="color:#8e8e93">Quarterly report</div></div><div style="color:#8e8e93">2m</div></div>
+        <div class="b-row"><div><div style="font-weight:600">Jürgen M.</div><div style="color:#8e8e93">Halo 😀</div></div><div style="color:#8e8e93">14m</div></div>
+        <div class="b-row" style="border:0"><div><div style="font-weight:600">Build Bot</div><div style="color:#8e8e93">Nightly build passed</div></div><div style="color:#8e8e93">1h</div></div>
+        <div class="b-dock"><span>♫</span><span>☑</span><span class="on">✉</span><span>⧉</span><span>⚙</span></div>
+      </div>
+    </div></div>
+    <div class="card-body"><h3>B · Island</h3><p>Pure black, like a phone's dynamic island: crisp white text, one bright colour per feature (green music, blue mail), icon dock at the bottom. Blends into the top of the screen; very clean and minimal.</p></div>
+  </div>
+
+  <!-- C -->
+  <div class="card" data-choice="cards" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="stage">
+      <div class="lbl">Pill</div>
+      <div class="c-pill">♫ Die For You <span class="c-chip">✉ 3</span></div>
+      <div class="lbl">Notification</div>
+      <div class="c-toast"><div style="display:flex;justify-content:space-between;color:#9aa0b0;font-size:11px;margin-bottom:6px"><span>✉ Mail · Work</span><span>now</span></div><div style="font-weight:600">Build Bot</div><div style="color:#9aa0b0">Nightly build passed</div></div>
+      <div class="lbl">Mail tab</div>
+      <div class="c-panel">
+        <div class="c-tabs"><span>Music</span><span>Tasks</span><span class="on">Mail 3</span><span>⋯</span></div>
+        <div class="c-card"><div class="c-sq" style="background:#2b3350;color:#c9d6ff">AL</div><div style="flex:1"><div style="font-weight:600">Ann Lee</div><div style="color:#9aa0b0">Quarterly report</div></div><div style="color:#9aa0b0;font-size:11px">2m</div></div>
+        <div class="c-card"><div class="c-sq" style="background:#1f3b34;color:#9ff0d3">JM</div><div style="flex:1"><div style="font-weight:600">Jürgen M.</div><div style="color:#9aa0b0">Halo 😀</div></div><div style="color:#9aa0b0;font-size:11px">14m</div></div>
+        <div class="c-card" style="margin:0"><div class="c-sq" style="background:#3b2a1f;color:#ffd1a3">CI</div><div style="flex:1"><div style="font-weight:600">Build Bot</div><div style="color:#9aa0b0">Nightly build passed</div></div><div style="color:#9aa0b0;font-size:11px">1h</div></div>
+      </div>
+    </div></div>
+    <div class="card-body"><h3>C · Soft cards</h3><p>Dark grey surfaces with each item on its own rounded card, coloured initials, labelled tabs. Friendlier and roomier, closer to a desktop widget; a bit less "notch-like".</p></div>
+  </div>
+</div>

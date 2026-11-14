@@ -1,0 +1,112 @@
+<h2>Glass, applied everywhere</h2>
+<p class="subtitle">Check each screen. Anything you'd change? Click the ones you like as-is (multi-select).</p>
+
+<style>
+  .wall { background: radial-gradient(1200px 500px at 20% 0%, #4b5d8c 0%, transparent 60%), radial-gradient(900px 600px at 90% 30%, #7a4a66 0%, transparent 55%), linear-gradient(160deg,#25304a,#3b2a3d 60%,#1f3a3e); border-radius:14px; padding:18px; display:flex; justify-content:center; min-height:300px; align-items:flex-start }
+  .g { position:relative; color:#fff; font:12px system-ui; border-radius:26px; padding:12px; width:340px; overflow:hidden;
+       background: rgba(18,20,28,.58); backdrop-filter: blur(22px) saturate(140%); border:1px solid rgba(255,255,255,.16);
+       box-shadow: 0 18px 40px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.16) }
+  .g .tint { position:absolute; inset:-40px; background: radial-gradient(220px 140px at 15% 20%, rgba(255,110,90,.45), transparent 70%), radial-gradient(240px 160px at 90% 90%, rgba(196,49,122,.35), transparent 70%); z-index:0 }
+  .g > * { position:relative; z-index:1 }
+  .tabs { display:flex; gap:4px; padding:3px; border-radius:999px; background:rgba(255,255,255,.08); margin-bottom:12px }
+  .tabs span { flex:1; text-align:center; padding:5px 0; border-radius:999px; color:rgba(255,255,255,.55); font-size:13px }
+  .tabs .on { background:rgba(255,255,255,.2); color:#fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.2) }
+  .m { opacity:.62 }
+  .btn { width:34px; height:34px; border-radius:50%; display:grid; place-items:center; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.14); font-size:14px }
+  .btn.big { width:44px; height:44px; background:#fff; color:#111; font-size:16px }
+  .bar { height:5px; border-radius:3px; background:rgba(255,255,255,.18); position:relative }
+  .bar i { position:absolute; left:0; top:0; bottom:0; border-radius:3px; background:linear-gradient(90deg,#ffb199,#ff6f91) }
+  .row { display:flex; gap:10px; align-items:center; padding:7px 6px; border-radius:14px }
+  .row.h { background:rgba(255,255,255,.09) }
+  .ava { width:28px; height:28px; border-radius:50%; display:grid; place-items:center; font:700 11px system-ui; flex:none }
+  .chk { width:18px; height:18px; border-radius:50%; border:1.5px solid rgba(255,255,255,.45); flex:none }
+  .chk.on { background:linear-gradient(135deg,#7ee0a1,#2bb673); border-color:transparent; display:grid; place-items:center; font-size:11px }
+  .slider { flex:1; height:22px; border-radius:11px; background:rgba(255,255,255,.1); position:relative; overflow:hidden }
+  .slider i { position:absolute; inset:0 auto 0 0; background:rgba(255,255,255,.28); border-radius:11px }
+  .tog { width:34px; height:20px; border-radius:10px; background:rgba(255,255,255,.18); position:relative; flex:none }
+  .tog::after { content:""; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#fff }
+  .tog.on { background:linear-gradient(90deg,#5b8cff,#8a5bff) } .tog.on::after { left:16px }
+  .sec { font:600 10px system-ui; letter-spacing:.08em; text-transform:uppercase; opacity:.55; margin:10px 4px 6px }
+  .grp { background:rgba(255,255,255,.07); border-radius:16px; padding:2px 10px }
+  .grp > div { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.07) }
+  .grp > div:last-child { border:0 }
+  .pill { display:inline-flex; align-items:center; gap:8px; padding:7px 12px 7px 8px; border-radius:999px; color:#fff; font:600 12px system-ui; background: rgba(20,22,30,.6); border:1px solid rgba(255,255,255,.18); box-shadow:0 8px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.15) }
+</style>
+
+<div class="cards" data-multiselect>
+
+  <div class="card" data-choice="music" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="wall"><div class="g"><div class="tint"></div>
+      <div class="tabs"><span class="on">♫</span><span>☑</span><span>✉</span><span>⧉</span><span>⚙</span></div>
+      <div style="display:flex;gap:12px;align-items:center">
+        <div style="width:72px;height:72px;border-radius:16px;background:linear-gradient(135deg,#ff7a59,#c4317a);box-shadow:0 10px 24px rgba(196,49,122,.5)"></div>
+        <div style="flex:1;min-width:0"><div style="font:700 15px system-ui">Die For You</div><div class="m">The Weeknd · Starboy</div>
+          <div style="margin-top:8px;font-weight:600">'Cause I'm right for you, babe</div><div class="m" style="font-size:11px">I think it's time that you knew</div></div>
+      </div>
+      <div style="margin:12px 2px 4px" class="bar"><i style="width:42%"></i></div>
+      <div style="display:flex;justify-content:space-between;font-size:10px" class="m"><span>1:47</span><span>4:20</span></div>
+      <div style="display:flex;justify-content:center;gap:14px;align-items:center;margin-top:6px"><div class="btn">⏮</div><div class="btn big">❚❚</div><div class="btn">⏭</div></div>
+    </div></div></div>
+    <div class="card-body"><h3>Music</h3><p>Background glows in the cover's colours; current lyric line bold, next line dimmed; big round play button.</p></div>
+  </div>
+
+  <div class="card" data-choice="tasks" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="wall"><div class="g">
+      <div class="tabs"><span>♫</span><span class="on">☑</span><span>✉</span><span>⧉</span><span>⚙</span></div>
+      <div style="display:flex;gap:14px;align-items:center;margin-bottom:8px">
+        <svg width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="27" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="6"/><circle cx="32" cy="32" r="27" fill="none" stroke="url(#gr)" stroke-width="6" stroke-linecap="round" stroke-dasharray="170" stroke-dashoffset="60" transform="rotate(-90 32 32)"/><defs><linearGradient id="gr"><stop offset="0" stop-color="#ffb199"/><stop offset="1" stop-color="#ff6f91"/></linearGradient></defs><text x="32" y="37" text-anchor="middle" fill="#fff" font-size="13" font-weight="700" font-family="system-ui">16:12</text></svg>
+        <div><div style="font:700 14px system-ui">Focus</div><div class="m">Session 2 of 4 · break next</div><div style="display:flex;gap:6px;margin-top:6px"><div class="btn" style="width:28px;height:28px">❚❚</div><div class="btn" style="width:28px;height:28px">↺</div></div></div>
+      </div>
+      <div class="row h"><div class="chk"></div><div style="flex:1">Send the quarterly report</div><div class="m" style="font-size:11px">14:30</div></div>
+      <div class="row"><div class="chk"></div><div style="flex:1">Call the dentist</div></div>
+      <div class="row m"><div class="chk on">✓</div><div style="flex:1;text-decoration:line-through">Water plants</div></div>
+      <div class="row m" style="font-size:11px"><span>＋</span> Add a task</div>
+    </div></div></div>
+    <div class="card-body"><h3>Tasks</h3><p>Pomodoro as a ring timer; round check circles that fill green; inline "Add a task".</p></div>
+  </div>
+
+  <div class="card" data-choice="clips" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="wall"><div class="g">
+      <div class="tabs"><span>♫</span><span>☑</span><span>✉</span><span class="on">⧉</span><span>⚙</span></div>
+      <div style="display:flex;justify-content:space-between;margin:0 6px 6px" class="m"><span>Clipboard · 12</span><span>Clear</span></div>
+      <div class="row h"><div class="ava" style="border-radius:8px;background:rgba(91,140,255,.3)">T</div><div style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">git push -u origin feat/finish-phases</div><span style="padding:3px 8px;border-radius:999px;background:rgba(255,255,255,.18);font-size:11px">Copy</span></div>
+      <div class="row"><div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#2bc48a,#1b8f9e)"></div><div style="flex:1">Image · 1280×720</div><div class="m" style="font-size:11px">5m</div></div>
+      <div class="row"><div class="ava" style="border-radius:8px;background:rgba(255,165,36,.3)">🔗</div><div style="flex:1">github.com/rozindzakwan/…</div><div class="m" style="font-size:11px">12m</div></div>
+    </div></div></div>
+    <div class="card-body"><h3>Clipboard &amp; shelf</h3><p>Type icons (text, image thumbnail, link); hovering a row shows a "Copy" chip; same style for the file shelf.</p></div>
+  </div>
+
+  <div class="card" data-choice="mixer" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="wall"><div class="g">
+      <div class="tabs"><span>♫</span><span>☑</span><span>✉</span><span class="on">🔊</span><span>⚙</span></div>
+      <div class="row"><div class="ava" style="background:#1db954">S</div><div style="width:60px">Spotify</div><div class="slider"><i style="width:80%"></i></div></div>
+      <div class="row"><div class="ava" style="background:#4285f4">C</div><div style="width:60px">Chrome</div><div class="slider"><i style="width:55%"></i></div></div>
+      <div class="row m"><div class="ava" style="background:#666">🔇</div><div style="width:60px">System</div><div class="slider"><i style="width:30%"></i></div></div>
+    </div></div></div>
+    <div class="card-body"><h3>Mixer &amp; sounds</h3><p>Thick rounded sliders you can grab anywhere; app initials in the app's colour; tap the icon to mute.</p></div>
+  </div>
+
+  <div class="card" data-choice="settings" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="wall"><div class="g" style="width:360px">
+      <div style="font:700 15px system-ui;margin:2px 4px 4px">Settings</div>
+      <div class="sec">Features</div>
+      <div class="grp"><div><span>♫ Now playing</span><span class="tog on"></span></div><div><span>✉ Mail <span class="m">· uses network</span></span><span class="tog on"></span></div><div><span>⧉ Clipboard</span><span class="tog"></span></div></div>
+      <div class="sec">Mail accounts</div>
+      <div class="grp"><div><span><span style="color:#5bd38a">●</span> Work · Spacemail</span><span class="m">Remove</span></div><div><span style="color:#9fb8ff">＋ Add mail account…</span><span></span></div></div>
+    </div></div></div>
+    <div class="card-body"><h3>Settings &amp; dialogs</h3><p>Same glass sheet, grouped sections like phone settings, real toggle switches, green/red status dot per mail account.</p></div>
+  </div>
+
+  <div class="card" data-choice="notify" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="wall" style="flex-direction:column;align-items:center;gap:10px">
+      <div class="m" style="color:#fff;font-size:11px">1 · idle</div>
+      <div class="pill"><div style="width:20px;height:20px;border-radius:6px;background:linear-gradient(135deg,#ff7a59,#c4317a)"></div>Die For You</div>
+      <div class="m" style="color:#fff;font-size:11px">2 · new mail: the pill stretches into a banner for ~4 s</div>
+      <div class="pill" style="border-radius:22px;padding:9px 14px 9px 9px;width:300px"><div class="ava" style="width:32px;height:32px;background:linear-gradient(135deg,#5b8cff,#8a5bff)">BB</div><div style="flex:1;font-weight:400"><div style="font-weight:600">Build Bot</div><div class="m">Nightly build passed</div></div></div>
+      <div class="m" style="color:#fff;font-size:11px">3 · then shrinks back, keeping a count</div>
+      <div class="pill"><div style="width:20px;height:20px;border-radius:6px;background:linear-gradient(135deg,#ff7a59,#c4317a)"></div>Die For You<span style="padding:2px 7px;border-radius:999px;background:rgba(120,170,255,.25);color:#bcd4ff;font-size:11px">✉ 3</span></div>
+    </div></div>
+    <div class="card-body"><h3>Notifications &amp; motion</h3><p>Alerts appear <b>in the notch itself</b> (stretch, show, shrink back) instead of a separate Windows toast. Springy open/close, content fades in, the tab highlight slides.</p></div>
+  </div>
+
+</div>
