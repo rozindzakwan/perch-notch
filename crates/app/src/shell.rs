@@ -574,7 +574,7 @@ impl Shell {
 
     fn refresh_settings_form(&mut self) {
         let monitors = self.services.monitors.monitors().unwrap_or_default();
-        let spec = forms::settings_spec(self.model.config(), &monitors);
+        let spec = forms::settings_spec(self.model.config(), &monitors, self.model.mail());
         if let Some(s) = &mut self.settings {
             s.replace(spec);
         }
@@ -738,7 +738,7 @@ impl Shell {
             return;
         }
         let monitors = self.services.monitors.monitors().unwrap_or_default();
-        let spec = forms::settings_spec(self.model.config(), &monitors);
+        let spec = forms::settings_spec(self.model.config(), &monitors, self.model.mail());
         match FormWindow::open(el, spec, self.palette()) {
             Ok(w) => self.settings = Some(w),
             Err(e) => log::warn!("cannot open settings: {e}"),
@@ -1374,8 +1374,12 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
             #[cfg(feature = "mail")]
             UserEvent::Mail(update) => {
+                let status = matches!(update, perch_core::mail::MailUpdate::Status { .. });
                 let fx = self.model.mail_update(update);
                 self.run_effects(el, fx);
+                if status && self.settings.is_some() {
+                    self.refresh_settings_form();
+                }
             }
         }
     }

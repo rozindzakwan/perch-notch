@@ -260,6 +260,77 @@ fn main() {
     let (bw, bh) = ((300.0 * scale) as u32, (56.0 * scale) as u32);
     let f = Frame::new(bw, bh, scale, pal);
     save("banner", bw, bh, &f, &banner, &mut r);
+    // The settings window.
+    {
+        use perch_ui::form::{Field, FormSpec, FormState};
+        let toggle = |id: &str, label: &str, value: bool| Field::Toggle {
+            id: id.into(),
+            label: label.into(),
+            value,
+            disabled: false,
+        };
+        let mut st = FormState::new(FormSpec {
+            title: "Perch settings".into(),
+            fields: vec![
+                Field::Group("Notch".into()),
+                Field::Choice {
+                    id: "position".into(),
+                    label: "Position".into(),
+                    options: ["Top center", "Top left", "Top right", "Bottom center"]
+                        .iter()
+                        .chain(["Bottom left", "Bottom right", "Left", "Right"].iter())
+                        .map(|s| s.to_string())
+                        .collect(),
+                    selected: 0,
+                },
+                Field::Choice {
+                    id: "theme".into(),
+                    label: "Theme".into(),
+                    options: vec!["System".into(), "Dark".into(), "Light".into()],
+                    selected: 1,
+                },
+                toggle("fs", "Hide while a fullscreen app is active", true),
+                toggle("auto", "Start at login", false),
+                Field::Group("Notifications".into()),
+                toggle("n1", "Show notifications in the notch", true),
+                toggle("n2", "Also show system notifications", false),
+                Field::Group("Mail accounts".into()),
+                Field::Status {
+                    label: "Work".into(),
+                    detail: "online \u{b7} ann@example.com on imap.example.com".into(),
+                    ok: Some(true),
+                    action: Some(("rm0".into(), "Remove".into())),
+                },
+                Field::Status {
+                    label: "Home".into(),
+                    detail: "sign-in failed: bad password".into(),
+                    ok: Some(false),
+                    action: Some(("rm1".into(), "Remove".into())),
+                },
+                Field::Note(
+                    "Everything runs locally. Nothing is sent anywhere unless you turn on a \
+                     feature marked \"uses network\"."
+                        .into(),
+                ),
+                Field::Buttons(vec![
+                    ("close".into(), "Done".into()),
+                    ("open".into(), "Open config file".into()),
+                ]),
+            ],
+            size: (460, 640),
+        });
+        let (w, h) = ((460.0 * scale) as u32, (600.0 * scale) as u32);
+        if let (Some(mut pm), Ok(mut text)) =
+            (Pixmap::new(w, h), perch_ui::text::TextRenderer::new())
+        {
+            st.paint(&mut pm, &mut text, &pal, scale);
+            let path = out.join("settings.png");
+            match pm.save_png(&path) {
+                Ok(()) => println!("{}", path.display()),
+                Err(e) => eprintln!("{}: {e}", path.display()),
+            }
+        }
+    }
     // Panels with a shadow margin, as the app draws them.
     let m = 12.0 * scale;
     let (lw, lh) = (380.0 * scale, 300.0 * scale);

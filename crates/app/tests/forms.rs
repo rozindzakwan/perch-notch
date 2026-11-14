@@ -1,9 +1,10 @@
 use perch_app::features::Feature;
 use perch_app::forms::{
-    apply_settings_event, parse_due, settings_spec, todo_spec, SettingsOutcome,
+    apply_settings_event, parse_due, set_feature, settings_spec, todo_spec, SettingsOutcome,
 };
-use perch_core::config::{Config, Theme};
+use perch_core::config::{Config, MailAccount, Theme};
 use perch_core::geometry::{Monitor, NotchPosition};
+use perch_core::mail::{AccountStatus, MailBoard, MailUpdate};
 use perch_ui::form::{Field, FormEvent, FormState};
 
 fn monitors() -> Vec<Monitor> {
@@ -33,7 +34,7 @@ fn monitors() -> Vec<Monitor> {
 
 #[test]
 fn settings_form_lists_every_feature_and_marks_network_and_missing_ones() {
-    let spec = settings_spec(&Config::default(), &monitors());
+    let spec = settings_spec(&Config::default(), &monitors(), &MailBoard::default());
     let toggles: Vec<&str> = spec
         .fields
         .iter()
@@ -169,4 +170,75 @@ fn notification_toggles_edit_the_config() {
         panic!("in-notch toggle")
     };
     assert!(!c.notifications.in_notch);
+}
+
+fn group_of<'a>(spec: &'a perch_ui::form::FormSpec, id: &str) -> Option<&'a str> {
+    let mut group = None;
+    for f in &spec.fields {
+        match f {
+            Field::Group(g) => group = Some(g.as_str()),
+            Field::Toggle { id: fid, .. } if fid == id => return group,
+            _ => {}
+        }
+    }
+    None
+}
+
+#[test]
+fn settings_has_notification_rows_in_their_own_group() {
+    let spec = settings_spec(&Config::default(), &monitors(), &MailBoard::default());
+    assert_eq!(group_of(&spec, "notify_in_notch"), Some("Notifications"));
+    assert_eq!(group_of(&spec, "notify_system"), Some("Notifications"));
+    assert_eq!(group_of(&spec, "autostart"), Some("Notch"));
+    assert!(spec.fields.iter().any(
+        |f| matches!(f, Field::Choice { id, options, .. } if id == "theme" && options.len() == 3)
+    ));
+}
+
+#[test]
+fn mail_account_rows_show_status() {
+    let mut cfg = Config::default();
+    set_feature(&mut cfg, Feature::Mail, true);
+    for name in ["Work", "Home"] {
+        cfg.mail.accounts.push(MailAccount {
+            name: name.into(),
+            host: "imap.example.com".into(),
+            port: 993,
+            username: format!("{}@example.com", name.to_lowercase()),
+            ..MailAccount::default()
+        });
+    }
+    let mut board = MailBoard::default();
+    board.set_accounts(&["Work".into(), "Home".into()]);
+    board.apply(MailUpdate::Status {
+        account: "Work".into(),
+        status: AccountStatus::AuthFailed("bad password".into()),
+    });
+    let spec = settings_spec(&cfg, &monitors(), &board);
+    let rows: Vec<(&str, &str, Option<bool>, Option<&str>)> = spec
+        .fields
+        .iter()
+        .filter_map(|f| match f {
+            Field::Status {
+                label,
+                detail,
+                ok,
+                action,
+            } => Some((
+                label.as_str(),
+                detail.as_str(),
+                *ok,
+                action.as_ref().map(|(id, _)| id.as_str()),
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(rows[0].0.contains("Work"));
+    assert!(rows[0].1.contains("sign-in failed"), "{:?}", rows[0]);
+    assert_eq!(rows[0].2, Some(false));
+    assert_eq!(rows[0].3, Some("mail-remove:0"));
+    assert!(rows[1].1.contains("connecting"), "{:?}", rows[1]);
+    assert_eq!(rows[1].2, None, "still connecting: neither ok nor failed");
+    assert_eq!(rows[1].3, Some("mail-remove:1"));
 }

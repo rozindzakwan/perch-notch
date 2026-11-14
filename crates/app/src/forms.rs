@@ -5,7 +5,7 @@
 
 use perch_core::config::{Config, MailAccount, Theme};
 use perch_core::geometry::{Monitor, NotchPosition};
-use perch_core::mail::{Security, PRESETS};
+use perch_core::mail::{AccountStatus, MailBoard, Security, PRESETS};
 use perch_ui::form::{Field, FormEvent, FormSpec};
 
 use crate::features::Feature;
@@ -32,8 +32,8 @@ fn feature_id(f: Feature) -> String {
 }
 
 /// Build the settings form for a config and the current monitors.
-pub fn settings_spec(cfg: &Config, monitors: &[Monitor]) -> FormSpec {
-    let mut fields = vec![Field::Heading("Notch".into())];
+pub fn settings_spec(cfg: &Config, monitors: &[Monitor], mail: &MailBoard) -> FormSpec {
+    let mut fields = vec![Field::Group("Notch".into())];
     fields.push(Field::Choice {
         id: "position".into(),
         label: "Position".into(),
@@ -83,7 +83,7 @@ pub fn settings_spec(cfg: &Config, monitors: &[Monitor]) -> FormSpec {
         disabled: false,
     });
 
-    fields.push(Field::Heading("Notifications".into()));
+    fields.push(Field::Group("Notifications".into()));
     fields.push(Field::Toggle {
         id: "notify_in_notch".into(),
         label: "Show notifications in the notch".into(),
@@ -96,7 +96,7 @@ pub fn settings_spec(cfg: &Config, monitors: &[Monitor]) -> FormSpec {
         value: cfg.notifications.system,
         disabled: false,
     });
-    fields.push(Field::Heading("Features".into()));
+    fields.push(Field::Group("Features".into()));
     for f in Feature::ALL {
         let mut label = f.label().to_string();
         if f.uses_network() {
@@ -120,7 +120,7 @@ pub fn settings_spec(cfg: &Config, monitors: &[Monitor]) -> FormSpec {
             .into(),
     ));
     if Feature::Mail.enabled_in(cfg) && Feature::Mail.compiled_in() {
-        fields.push(Field::Heading("Mail accounts".into()));
+        fields.push(Field::Group("Mail accounts".into()));
         if cfg.mail.accounts.is_empty() {
             fields.push(Field::Note(
                 "No accounts yet. Perch only reads: it shows unread mail and never marks, \
@@ -129,14 +129,23 @@ pub fn settings_spec(cfg: &Config, monitors: &[Monitor]) -> FormSpec {
             ));
         }
         for (i, a) in cfg.mail.accounts.iter().enumerate() {
-            fields.push(Field::Note(format!(
-                "{}: {} on {}",
-                a.name, a.username, a.host
-            )));
-            fields.push(Field::Buttons(vec![(
-                format!("mail-remove:{i}"),
-                format!("Remove {}", a.name),
-            )]));
+            let status = mail
+                .accounts()
+                .iter()
+                .find(|s| s.name == a.name)
+                .map(|s| s.status.clone())
+                .unwrap_or(AccountStatus::Connecting);
+            let ok = match status {
+                AccountStatus::Online { .. } => Some(true),
+                AccountStatus::Connecting => None,
+                _ => Some(false),
+            };
+            fields.push(Field::Status {
+                label: a.name.clone(),
+                detail: format!("{} \u{b7} {} on {}", status.label(), a.username, a.host),
+                ok,
+                action: Some((format!("mail-remove:{i}"), "Remove".into())),
+            });
         }
         fields.push(Field::Buttons(vec![(
             "mail-add".into(),

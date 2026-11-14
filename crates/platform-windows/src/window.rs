@@ -68,6 +68,36 @@ pub fn apply_notch_styles(hwnd: HWND) -> Result<isize> {
     Ok(style)
 }
 
+/// Give an ordinary (form) window the Windows 11 look: the Mica backdrop on
+/// its title bar and frame, and a dark title bar when `dark`. Older builds
+/// ignore the attributes; failures are cosmetic and ignored.
+pub fn apply_mica(hwnd: HWND, dark: bool) {
+    use windows::Win32::Graphics::Dwm::{
+        DWMSBT_MAINWINDOW, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    };
+    if hwnd.is_invalid() {
+        return;
+    }
+    let dark = u32::from(dark);
+    let backdrop = DWMSBT_MAINWINDOW.0;
+    // SAFETY: `hwnd` is a live window the caller owns; each call passes a
+    // pointer to a correctly sized 32-bit value with its length.
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &dark as *const u32 as *const std::ffi::c_void,
+            std::mem::size_of::<u32>() as u32,
+        );
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_SYSTEMBACKDROP_TYPE,
+            &backdrop as *const i32 as *const std::ffi::c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
+    }
+}
+
 /// Additionally make a window click-through, for the invisible hover strip: it
 /// must receive cursor enter/leave but never swallow a click meant for whatever
 /// is underneath.
