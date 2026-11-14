@@ -93,8 +93,10 @@ try {
 
     if ($mockProc) {
         Stop-Process -Id $mockProc.Id -Force
-        $ok = WaitFor { -not (Status).track } 8000
-        Check 'player_quit_reported' $ok "track='$((Status).track)'"
+        # The quit player's track must disappear. Perch then shows nothing, or
+        # whichever other player (Spotify, a browser) Windows makes current.
+        $ok = WaitFor { (Status).track -ne $expected } 8000
+        Check 'player_quit_reported' $ok "track after quit='$((Status).track)'"
     }
 }
 finally {

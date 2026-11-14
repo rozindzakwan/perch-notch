@@ -228,3 +228,48 @@ clipboard (`text/uri-list` via `arboard`), which file managers paste.
   `/utf-8` flag to MinGW's g++, so the dictation build needs the MSVC
   toolchain (CI's windows-latest); this machine has no admin rights to
   install MSVC, so the Windows dictation build is CI-only.
+
+## ADR-016: Packaging details and soak scoring
+
+- **Windows.** `build.rs` embeds the icon and version resource with
+  `winresource` (MinGW `windres` or MSVC `rc`). The NSIS installer is
+  per-user, kills a running `perch.exe` before it overwrites files, and on
+  uninstall removes the HKCU Run value and the toast AppUserModelID but keeps
+  `%APPDATA%\perch` (settings and data belong to the user). The portable zip
+  has the same files plus a note about SmartScreen.
+- **Linux.** Besides the `.deb` there is a tarball holding `install.sh`, which
+  installs into `~/.local` (binary, menu entry, hicolor icons) and removes
+  everything again with `--uninstall`. Both artifacts get a `SHA256SUMS`.
+  `linux-ci.sh debinstall` installs the `.deb` into the clean container,
+  runs it and removes it.
+- **Soak scoring.** The soak runs on a desktop that is in use, so naive
+  first-sample/last-sample deltas fail on warm-up (clipboard history and
+  screen-time rows filling up) and on a single busy sample. Scoring therefore
+  skips a 2-minute warm-up, compares medians of the first and last 5
+  minutes, and gates CPU on the median 10-second interval (≤ 0.5 % of a
+  core: a busy loop raises every interval) with an average ceiling of 2 %.
+  Both scripts can re-score an existing CSV.
+- **Real-desktop smoke.** `smoke-x11.sh` takes its coordinates from the
+  primary monitor (`xrandr`), so the same script runs on Xvfb and, through
+  `mint-test.sh`, on a real Cinnamon desktop of any size.
+
+## Bugs found during packaging and real use (and fixed)
+
+- **Startup froze while Spotify was playing (Windows).** `SmtcMedia::start`
+  ran on the UI thread, a COM single-threaded apartment, and blocked on WinRT
+  async operations (`RequestAsync().get()`, then reading the current track's
+  cover thumbnail). Reading Spotify's thumbnail needs a call back into the
+  calling apartment, which was blocked: a deadlock. The window appeared but
+  Perch never finished starting (no hover, no mixer, no lyrics, no CLI).
+  Found with a symbolized backtrace (`media.rs` `read_track` → `.get()` from
+  `Shell::resumed`). Fix: the blocking setup runs on its own MTA thread and
+  `start` returns at once; the first track arrives through the sink like
+  every later change. Regression test: `platform-windows/tests/smtc_sta.rs`
+  (blocked > 5 s before the fix with Spotify current; 41 µs after).
+- **Lyrics never appeared when turned on mid-song.** They were requested
+  only on a track change, so enabling the feature while a song played did
+  nothing until the next song. `Model::apply_config` now requests lyrics for
+  the current track when the feature becomes active. Test:
+  `turning_lyrics_on_mid_song_fetches_them_for_the_current_track`.
+- The status file now reports `mixer_sessions` and `lyrics_loaded`, so both
+  features can be checked end to end without screenshots.

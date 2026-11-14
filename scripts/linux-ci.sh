@@ -6,8 +6,8 @@
 # container run means the same thing as a green CI run.
 #
 # Usage: scripts/linux-ci.sh [stage...]
-#   stages: check test build smoke mpris pulse wayland deb debinstall soak all
-#   (default: all = check test build smoke mpris pulse wayland deb)
+#   stages: check test build smoke mpris pulse deb debinstall soak all
+#   (default: all = check test build smoke mpris pulse deb debinstall)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -70,25 +70,35 @@ stage_pulse() {
     scripts/pulse-test.sh
 }
 
-stage_wayland() {
-    say "wlr-layer-shell smoke test under headless Sway"
-    PERCH_BIN="$(target_dir)/release/perch" scripts/smoke-wayland.sh --out "$OUT"
-}
-
 stage_deb() {
     say "cargo deb"
     cargo deb -p perch --no-build --locked -o "$OUT/"
     ls -l "$OUT"/*.deb
     dpkg-deb --info "$OUT"/perch_*.deb | tee "$OUT/deb-info.txt"
+    dpkg-deb --contents "$OUT"/perch_*.deb >>"$OUT/deb-info.txt"
+
+    say "portable tarball with install.sh"
+    local version stage
+    version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+    stage="$(mktemp -d)/perch-$version-linux-x86_64"
+    mkdir -p "$stage"
+    cp "$(target_dir)/release/perch" packaging/linux/install.sh packaging/linux/perch.desktop \
+        assets/perch.png assets/perch-128.png README.md LICENSE-MIT LICENSE-APACHE "$stage/"
+    tar -C "$(dirname "$stage")" -czf "$OUT/perch-$version-linux-x86_64.tar.gz" "$(basename "$stage")"
+    (cd "$OUT" && sha256sum perch_*.deb perch-*-linux-x86_64.tar.gz | tee SHA256SUMS)
 }
 
 stage_debinstall() {
-    say "install the .deb into this (clean) system and run --version"
-    apt-get update -qq
-    apt-get install -y -qq "$OUT"/perch_*.deb
+    say "install the .deb, check it, remove it"
+    local sudo=""
+    [ "$(id -u)" -ne 0 ] && sudo="sudo"
+    $sudo apt-get update -qq
+    $sudo apt-get install -y -qq "$OUT"/perch_*.deb
     perch --version
     test -f /usr/share/applications/perch.desktop
-    apt-get remove -y -qq perch
+    test -f /usr/share/icons/hicolor/256x256/apps/perch.png
+    $sudo apt-get remove -y -qq perch
+    if [ -e /usr/bin/perch ]; then echo "perch still installed after apt remove" >&2; return 1; fi
 }
 
 stage_soak() {
@@ -99,7 +109,7 @@ stage_soak() {
 
 stages=("$@")
 if [ ${#stages[@]} -eq 0 ] || [ "${stages[0]}" = all ]; then
-    stages=(check test build smoke mpris pulse wayland deb)
+    stages=(check test build smoke mpris pulse deb debinstall)
 fi
 
 for s in "${stages[@]}"; do

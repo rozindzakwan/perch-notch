@@ -40,15 +40,15 @@ fi
 echo "  session: ${XDG_SESSION_TYPE:-unset} (DISPLAY=${DISPLAY:-unset} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-unset})"
 echo "  desktop: ${XDG_CURRENT_DESKTOP:-unknown}"
 
-# Required build and runtime libraries.
+# Required build libraries (the same set docker/linux-ci.Dockerfile uses).
 #   build-essential/pkg-config : cc + linker for the Rust build
-#   libx11/libxcb/libxkbcommon : winit's X11 backend
-#   libxcb-randr/xfixes        : monitor enumeration and selection events
-#   libwayland/libxkbcommon-x11: winit's Wayland backend (best effort path)
-#   libdbus-1-dev              : MPRIS over D-Bus (zbus), notifications
-#   libasound2-dev             : cpal/rodio (white noise)
-#   libgtk-3-dev + libayatana  : tray icon (StatusNotifierItem via tray-icon)
-#   libssl-dev                 : TLS for the opt-in LRCLIB lyrics fetch
+#   libx11/libxcb/libxkbcommon : winit X11 backend, x11rb (dock, XShape, XFixes)
+#   libwayland-dev             : winit Wayland backend (compiled in, not supported)
+#   libpulse-dev               : per-app volume mixer (libpulse; works on PipeWire)
+#   libasound2-dev             : audio output (white noise) and dictation input
+#   libv4l-dev                 : camera mirror (v4l2)
+#   cmake/clang/libclang-dev   : only for the optional dictation build (whisper.cpp)
+# No GTK: the tray is a pure-Rust StatusNotifierItem (ksni), D-Bus is pure Rust (zbus).
 PKGS=(
     build-essential
     pkg-config
@@ -56,28 +56,29 @@ PKGS=(
     git
     libx11-dev
     libxcb1-dev
-    libxcb-randr0-dev
-    libxcb-xfixes0-dev
-    libxcb-shape0-dev
-    libxcb-cursor-dev
     libxkbcommon-dev
     libxkbcommon-x11-dev
     libwayland-dev
-    libdbus-1-dev
+    libpulse-dev
     libasound2-dev
-    libssl-dev
-    libgtk-3-dev
-    libayatana-appindicator3-dev
+    libv4l-dev
+    cmake
+    clang
+    libclang-dev
 )
 
-# Optional runtime helpers, declared as Recommends in the .deb.
+# Optional runtime helpers and the tools scripts/mint-test.sh drives.
 OPTIONAL_PKGS=(
-    xdotool            # paste-after-dictation via XTEST
-    tesseract-ocr      # screenshot OCR
-    playerctl          # used by mint-test.sh to drive a real MPRIS player
-    scrot              # screenshot evidence in mint-test.sh
-    x11-utils          # xprop/xwininfo, used by mint-test.sh assertions
-    sysstat            # pidstat, used by the soak test
+    tesseract-ocr      # screenshot OCR (the .deb Recommends it)
+    playerctl          # mint-test.sh: drive a real MPRIS player
+    xdotool            # mint-test.sh: synthetic hover / clicks
+    x11-utils          # xprop, xwininfo, xdpyinfo
+    x11-xserver-utils  # xrandr (monitor geometry)
+    imagemagick        # import: cropped screenshots as evidence
+    xclip              # clipboard checks
+    wmctrl             # fullscreen auto-hide check
+    jq                 # reads Perch status JSON
+    sysstat            # pidstat
 )
 
 say "Updating package lists"
@@ -121,7 +122,7 @@ if [ "$WITH_RUSTUP" -eq 1 ]; then
 fi
 
 say "Checking the tools mint-test.sh needs"
-for t in xdotool playerctl scrot xprop pidstat; do
+for t in xdotool playerctl xprop xrandr import xclip wmctrl jq tesseract; do
     if command -v "$t" >/dev/null 2>&1; then
         printf '  %-10s ok\n' "$t"
     else
@@ -134,7 +135,7 @@ cat <<'EOF'
 Next steps on this machine:
 
   cargo build --release
-  ./scripts/mint-test.sh          # builds, tests, and drives the real session
+  ./scripts/mint-test.sh          # builds, tests, drives the real session (~40 min)
 
 If you want the Debian package:
 
@@ -142,8 +143,8 @@ If you want the Debian package:
   cargo deb -p perch
 
 Notes:
-  * Perch needs a compositor for a transparent pill. Cinnamon provides one
-    (Muffin). Without compositing, the pill falls back to an opaque background.
-  * On a Wayland session Perch starts but the dock/above window properties are
-    X11-only; see the README's support table.
+  * Cinnamon composites (Muffin), so the pill is translucent. Without a
+    compositor it is opaque with XShape-rounded corners.
+  * Wayland sessions are not supported yet; Perch needs an X11 session
+    (Cinnamon on Mint is X11 by default). See the README.
 EOF

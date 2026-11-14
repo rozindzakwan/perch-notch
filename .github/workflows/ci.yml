@@ -92,7 +92,7 @@ jobs:
             jq wmctrl x11-apps stalonetray espeak-ng
       - name: install cargo-deb
         run: cargo install --locked cargo-deb
-      - name: linux-ci (check, test, build, smoke, mpris, pulse, wayland, deb)
+      - name: linux-ci (check, test, build, smoke, mpris, pulse, deb)
         run: scripts/linux-ci.sh all
       - uses: actions/upload-artifact@v4
         if: always()

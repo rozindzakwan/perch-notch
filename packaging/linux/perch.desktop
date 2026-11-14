@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Perch
+GenericName=Dynamic notch
+Comment=A lightweight dynamic notch at the top of your screen
+Exec=perch
+Icon=perch
+Terminal=false
+Categories=Utility;
+Keywords=notch;island;media;clipboard;pomodoro;
+StartupNotify=false

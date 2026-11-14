@@ -233,6 +233,16 @@ impl Model {
         &self.media
     }
 
+    /// Audio sessions the mixer last reported.
+    pub fn sessions(&self) -> &[AudioSession] {
+        &self.sessions
+    }
+
+    /// Whether synced lyrics are loaded for the current track.
+    pub fn has_lyrics(&self) -> bool {
+        self.lyrics.is_some()
+    }
+
     /// The clipboard board.
     pub fn clipboard(&self) -> &ClipboardHistory {
         &self.clipboard
@@ -332,6 +342,7 @@ impl Model {
     pub fn apply_config(&mut self, config: Config) -> Vec<Effect> {
         let mut fx = vec![Effect::Redraw];
         let old = std::mem::replace(&mut self.config, config);
+        let lyrics_were_on = self.features.is_active(Feature::Lyrics);
         self.features = ActiveFeatures::resolve(&self.config);
         if old.pomodoro != self.config.pomodoro && self.pomodoro.state() == TimerState::Idle {
             self.pomodoro = Pomodoro::new(self.config.pomodoro.clone());
@@ -354,6 +365,14 @@ impl Model {
         }
         if !self.is_active(Feature::Lyrics) {
             self.lyrics = None;
+        } else if !lyrics_were_on && self.lyrics.is_none() {
+            // Turned on mid-song: look up the track that is already playing
+            // instead of waiting for the next track change.
+            if let (Some(token), Some(track)) = (self.media.track_token(), self.media.track()) {
+                if !track.title.is_empty() {
+                    fx.push(Effect::FetchLyrics(lyrics_request(&token, track)));
+                }
+            }
         }
         if !self.is_active(Feature::WhiteNoise) && self.noise.is_audible() {
             self.noise = NoiseMix::default();

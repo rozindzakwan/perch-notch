@@ -77,9 +77,22 @@ if [ "$REAL" = 0 ]; then
     fi
 fi
 info "display $DISPLAY, compositor=$COMP, $(xdpyinfo | grep dimensions | xargs)"
+# Geometry of the monitor the pill sits on (the primary one), so the same
+# checks work on Xvfb's 1920x1080 and on a real desktop of any size.
+PRIMARY=$(xrandr --query 2>/dev/null | awk '/ connected primary/ {for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+x[0-9]+\+/) {print $i; exit}}')
+[ -n "$PRIMARY" ] || PRIMARY="$(xdpyinfo | awk '/dimensions/ {print $2}')+0+0"
+IFS='x+' read -r MW MH MX MY <<<"$PRIMARY"
+CX=$((MX + MW / 2))       # horizontal centre: where the pill is
+TOP=$MY                   # the monitor's top edge: the hover strip
+AWAY=$((MY + MH * 5 / 6)) # somewhere well below the pill
+CROPX=$((CX - 280))
+info "primary monitor ${MW}x${MH}+${MX}+${MY}"
 
 export HOME="$TMP/home"
 export XDG_CONFIG_HOME="$TMP/config" XDG_DATA_HOME="$TMP/data" XDG_CACHE_HOME="$TMP/cache"
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/bus" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+fi
 export XDG_RUNTIME_DIR="$TMP/run"
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
 export PERCH_STATUS_FILE="$TMP/status.json"
@@ -140,24 +153,24 @@ HOT_H=$(xwininfo -id "$HOT" | awk '/Height:/ {print $2}')
 check hot_zone_thin "$([ "$HOT_H" -le 8 ] && echo 1 || echo 0)" "${HOT_H}px"
 
 geom() { xwininfo -id "$PILL" | awk '/Absolute upper-left X/ {x=$4} /Absolute upper-left Y/ {y=$4} /Width:/ {w=$2} /Height:/ {h=$2} END {print x, y, w, h}'; }
-xdotool mousemove 40 900
+xdotool mousemove $((MX + 40)) $AWAY
 sleep 1
 read -r X Y W H <<<"$(geom)"
 info "collapsed: ${W}x${H} at $X,$Y"
 check collapsed_top_center "$([ "$Y" -eq 0 ] && [ $((X + W / 2)) -ge 950 ] && [ $((X + W / 2)) -le 970 ] && echo 1 || echo 0)" "centre x $((X + W / 2)), y $Y"
 
-xdotool mousemove 960 0
+xdotool mousemove $CX $TOP
 sleep 0.8
 read -r X2 Y2 W2 H2 <<<"$(geom)"
 info "hovered: ${W2}x${H2}; state=$(STATUS .state)"
 check hover_expands "$([ "$H2" -gt "$H" ] && [ "$W2" -gt "$W" ] && echo 1 || echo 0)" "${W}x${H} -> ${W2}x${H2}"
-import -window root -crop 560x220+680+0 "$OUT/x11-expanded-$COMP.png" 2>/dev/null || true
+import -window root -crop 560x220+$CROPX+$TOP "$OUT/x11-expanded-$COMP.png" 2>/dev/null || true
 
-xdotool mousemove 960 800
+xdotool mousemove $CX $((MY + MH * 3 / 4))
 sleep 1
 read -r _ _ W3 H3 <<<"$(geom)"
 check leave_collapses "$([ "$H3" -eq "$H" ] && echo 1 || echo 0)" "${W2}x${H2} -> ${W3}x${H3}"
-import -window root -crop 560x80+680+0 "$OUT/x11-collapsed-$COMP.png" 2>/dev/null || true
+import -window root -crop 560x80+$CROPX+$TOP "$OUT/x11-collapsed-$COMP.png" 2>/dev/null || true
 
 # CLI verbs over the Unix socket.
 "$BIN" toggle-notch
@@ -184,10 +197,10 @@ if [ -n "$MOCK" ] && [ -x "$MOCK" ] && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; t
     "$BIN" play-pause
     for _ in $(seq 30); do [ "$(STATUS .playing)" = true ] && break; sleep 0.1; done
     check mpris_cli_resume "$([ "$(STATUS .playing)" = true ] && echo 1 || echo 0)" "playing=$(STATUS .playing)"
-    xdotool mousemove 960 0
+    xdotool mousemove $CX $TOP
     sleep 0.8
-    import -window root -crop 560x220+680+0 "$OUT/x11-media-$COMP.png" 2>/dev/null || true
-    xdotool mousemove 40 900
+    import -window root -crop 560x220+$CROPX+$TOP "$OUT/x11-media-$COMP.png" 2>/dev/null || true
+    xdotool mousemove $((MX + 40)) $AWAY
     sleep 0.8
 else
     info "MPRIS end-to-end skipped (set PERCH_MOCK_PLAYER and run under dbus-run-session)"
@@ -209,10 +222,10 @@ if [ -n "$CLIP_OWNER" ] && [ -x "$CLIP_OWNER" ]; then
     for _ in $(seq 50); do [ "$(STATUS .clipboard)" = 2 ] && break; sleep 0.1; done
     check clipboard_records_after_secret "$([ "$(STATUS .clipboard)" = 2 ] && echo 1 || echo 0)" "entries=$(STATUS .clipboard)"
     "$BIN" tab clips
-    xdotool mousemove 960 0
+    xdotool mousemove $CX $TOP
     sleep 0.8
-    import -window root -crop 560x220+680+0 "$OUT/x11-clipboard-$COMP.png" 2>/dev/null || true
-    xdotool mousemove 40 900
+    import -window root -crop 560x220+$CROPX+$TOP "$OUT/x11-clipboard-$COMP.png" 2>/dev/null || true
+    xdotool mousemove $((MX + 40)) $AWAY
     sleep 0.8
 else
     info "clipboard end-to-end skipped (set PERCH_CLIP_OWNER)"
@@ -225,9 +238,9 @@ check shot_overlay_opens "$([ "$(STATUS .shot_open)" = true ] && echo 1 || echo 
 SHOT=$(xdotool search --name '^Perch screenshot$' | head -1 || true)
 if [ -n "$SHOT" ]; then
     xdotool windowactivate --sync "$SHOT" 2>/dev/null || true
-    xdotool mousemove 700 300 mousedown 1 mousemove 800 380 mousemove 900 450 mouseup 1
+    xdotool mousemove $((CX - 260)) $((TOP + 300)) mousedown 1 mousemove $((CX - 160)) $((TOP + 380)) mousemove $((CX - 60)) $((TOP + 450)) mouseup 1
     sleep 0.3
-    import -window root -crop 560x320+680+260 "$OUT/x11-shot-$COMP.png" 2>/dev/null || true
+    import -window root -crop 560x320+$CROPX+$((TOP + 260)) "$OUT/x11-shot-$COMP.png" 2>/dev/null || true
     xdotool key --window "$SHOT" Return
     for _ in $(seq 50); do [ "$(STATUS .shot_open)" = false ] && break; sleep 0.1; done
     TARGETS=$(xclip -o -selection clipboard -t TARGETS 2>/dev/null || true)
@@ -235,7 +248,7 @@ if [ -n "$SHOT" ]; then
     SIZE=$(xclip -o -selection clipboard -t image/png 2>/dev/null | wc -c)
     check shot_png_nonempty "$([ "$SIZE" -gt 100 ] && echo 1 || echo 0)" "$SIZE bytes"
 fi
-xdotool mousemove 40 900
+xdotool mousemove $((MX + 40)) $AWAY
 
 # Fullscreen auto-hide (EWMH _NET_WM_STATE_FULLSCREEN via the WM). The
 # victim is Perch's own settings window: a normal, focusable top-level.
@@ -270,7 +283,7 @@ if [ "$REAL" = 0 ]; then
 fi
 
 # Resource usage after settling.
-xdotool mousemove 40 900
+xdotool mousemove $((MX + 40)) $AWAY
 sleep 2
 RSS_KB=$(awk '/VmRSS/ {print $2}' /proc/"$PID"/status)
 T_A=$(awk '{print $14 + $15}' /proc/"$PID"/stat)

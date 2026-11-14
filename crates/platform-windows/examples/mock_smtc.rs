@@ -6,8 +6,9 @@
 //! the OS forwards button presses (which is how Perch's commands arrive). Any
 //! SMTC client (Perch, the Windows volume flyout) sees it as a real player.
 //!
-//! Usage: `mock_smtc [TITLE] [ARTIST]`; runs until its window is closed or the
-//! process is killed.
+//! Usage: `mock_smtc [TITLE] [ARTIST] [--cover IMAGE]`; runs until its window is
+//! closed or the process is killed. `--cover` publishes the image as a
+//! file-backed thumbnail (StorageFile), like many real players do.
 
 #[cfg(windows)]
 fn main() -> windows::core::Result<()> {
@@ -32,7 +33,17 @@ fn main() -> windows::core::Result<()> {
         unsafe { DefWindowProcW(h, m, w, l) }
     }
 
-    let mut args = std::env::args().skip(1);
+    let mut cover = None;
+    let mut rest = Vec::new();
+    let mut all = std::env::args().skip(1);
+    while let Some(a) = all.next() {
+        if a == "--cover" {
+            cover = all.next();
+        } else {
+            rest.push(a);
+        }
+    }
+    let mut args = rest.into_iter();
     let title = args.next().unwrap_or_else(|| "Mock Song".into());
     let artist = args.next().unwrap_or_else(|| "Mock Artist".into());
 
@@ -83,6 +94,13 @@ fn main() -> windows::core::Result<()> {
     let props = du.MusicProperties()?;
     props.SetTitle(&HSTRING::from(title))?;
     props.SetArtist(&HSTRING::from(artist))?;
+    if let Some(path) = cover {
+        let file =
+            windows::Storage::StorageFile::GetFileFromPathAsync(&HSTRING::from(path))?.get()?;
+        du.SetThumbnail(
+            &windows::Storage::Streams::RandomAccessStreamReference::CreateFromFile(&file)?,
+        )?;
+    }
     du.Update()?;
     smtc.SetPlaybackStatus(MediaPlaybackStatus::Playing)?;
 

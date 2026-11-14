@@ -35,6 +35,17 @@ fn main() -> ExitCode {
         };
     }
 
+    if args.first().map(String::as_str) == Some("--export-ico") {
+        let path = args.get(1).map(String::as_str).unwrap_or("perch.ico");
+        return match perch_app::icon::export_ico(std::path::Path::new(path)) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("perch: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+
     let invocation = cli::parse(&args);
     let gui = invocation.command == Command::Run;
     // Only short-lived CLI invocations talk to the parent terminal. The

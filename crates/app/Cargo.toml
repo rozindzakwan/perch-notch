@@ -82,3 +82,29 @@ perch-platform-linux = { path = "../platform-linux" }
 [dev-dependencies]
 tempfile.workspace = true
 hound = "3.5"
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[package.metadata.deb]
+name = "perch"
+maintainer = "Perch contributors <perch@users.noreply.invalid>"
+copyright = "2026, Perch contributors"
+license-file = ["../../LICENSE-MIT", "0"]
+extended-description = """\
+A small dynamic notch at the top of the screen that expands on hover: \
+now playing (MPRIS) with synced lyrics, to-dos, Pomodoro, clipboard history, \
+a file shelf, reminders, per-app volume, white noise, screen time, a \
+screenshot tool with OCR and a camera mirror. Everything runs locally."""
+section = "utils"
+priority = "optional"
+depends = "$auto"
+recommends = "tesseract-ocr"
+suggests = "playerctl"
+assets = [
+    ["target/release/perch", "usr/bin/", "755"],
+    ["../../packaging/linux/perch.desktop", "usr/share/applications/", "644"],
+    ["../../assets/perch.png", "usr/share/icons/hicolor/256x256/apps/perch.png", "644"],
+    ["../../assets/perch-128.png", "usr/share/icons/hicolor/128x128/apps/perch.png", "644"],
+    ["../../README.md", "usr/share/doc/perch/README.md", "644"],
+]

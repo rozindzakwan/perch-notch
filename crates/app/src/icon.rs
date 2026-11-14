@@ -65,3 +65,24 @@ pub fn export_png(path: &std::path::Path, size: u32) -> Result<(), String> {
     image::save_buffer(path, &rgba, side, side, image::ExtendedColorType::Rgba8)
         .map_err(|e| e.to_string())
 }
+
+/// Write a multi-resolution `.ico` (16-256 px) for the Windows executable and
+/// installer.
+pub fn export_ico(path: &std::path::Path) -> Result<(), String> {
+    use image::codecs::ico::{IcoEncoder, IcoFrame};
+    let mut frames = Vec::new();
+    for size in [16u32, 24, 32, 48, 64, 256] {
+        let (rgba, side) = icon_rgba(size);
+        if side == 0 {
+            return Err("could not render the icon".into());
+        }
+        frames.push(
+            IcoFrame::as_png(&rgba, side, side, image::ExtendedColorType::Rgba8)
+                .map_err(|e| e.to_string())?,
+        );
+    }
+    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
+    IcoEncoder::new(file)
+        .encode_images(&frames)
+        .map_err(|e| e.to_string())
+}

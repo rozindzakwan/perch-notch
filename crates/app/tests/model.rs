@@ -169,6 +169,33 @@ fn stale_lyrics_for_a_previous_track_are_ignored() {
 }
 
 #[test]
+fn turning_lyrics_on_mid_song_fetches_them_for_the_current_track() {
+    let now = t0();
+    let mut cfg = config_all();
+    cfg.features.lyrics = false;
+    let mut m = Model::new(cfg.clone(), now);
+    let fx = m.handle_event(
+        &PlatformEvent::Media(MediaEvent::TrackChanged(track(
+            "Already Playing",
+            200,
+            true,
+        ))),
+        now,
+    );
+    assert!(!fx.iter().any(|e| matches!(e, Effect::FetchLyrics(_))));
+    cfg.features.lyrics = true;
+    let fx = m.apply_config(cfg.clone());
+    assert!(
+        fx.iter()
+            .any(|e| matches!(e, Effect::FetchLyrics(r) if r.title == "Already Playing")),
+        "enabling lyrics must look up the song that is already playing: {fx:?}"
+    );
+    // Re-applying an unchanged config must not fetch again.
+    let fx = m.apply_config(cfg);
+    assert!(!fx.iter().any(|e| matches!(e, Effect::FetchLyrics(_))));
+}
+
+#[test]
 fn lyrics_follow_the_playhead_and_schedule_the_next_line() {
     let now = t0();
     let mut m = Model::new(config_all(), now);

@@ -101,6 +101,10 @@ pub struct Status {
     pub usage_apps: usize,
     /// The screenshot overlay is open.
     pub shot_open: bool,
+    /// Apps the volume mixer lists.
+    pub mixer_sessions: Vec<String>,
+    /// Synced lyrics are loaded for the current track.
+    pub lyrics_loaded: bool,
 }
 
 /// Write the status file if `$PERCH_STATUS_FILE` is set and it changed.

@@ -321,6 +321,13 @@ impl Shell {
         let shot_open = self.shot.is_some();
         let status = Status {
             shot_open,
+            mixer_sessions: self
+                .model
+                .sessions()
+                .iter()
+                .map(|s| s.name.clone())
+                .collect(),
+            lyrics_loaded: self.model.has_lyrics(),
             state: format!("{:?}", self.notch.state()),
             pill,
             visible,

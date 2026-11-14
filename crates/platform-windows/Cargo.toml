@@ -34,6 +34,8 @@ windows = { version = "0.58", features = [
     "Media_Control",
     "Foundation",
     "Storage_Streams",
+    # StorageFile: only the mock SMTC player (examples/) uses it.
+    "Storage",
     "Win32_System_Time",
     "Win32_System_SystemInformation",
     "Win32_System_RemoteDesktop",
