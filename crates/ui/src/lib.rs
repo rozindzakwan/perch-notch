@@ -8,6 +8,7 @@
 
 pub mod art;
 pub mod form;
+pub mod icons;
 pub mod mirror;
 pub mod render;
 pub mod shell;
