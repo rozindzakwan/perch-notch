@@ -230,3 +230,23 @@ pub fn send_paste() -> Result<()> {
         ))
     }
 }
+
+/// Whether Windows asks apps to reduce motion ("Animation effects" off in
+/// Settings > Accessibility > Visual effects). Errors count as "no".
+pub fn prefers_reduced_motion() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SystemParametersInfoW, SPI_GETCLIENTAREAANIMATION, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS,
+    };
+    let mut on = windows::Win32::Foundation::BOOL(1);
+    // SAFETY: SPI_GETCLIENTAREAANIMATION writes one BOOL to the pointer we
+    // pass, which points at a live local.
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some(&mut on as *mut _ as *mut core::ffi::c_void),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    ok.is_ok() && !on.as_bool()
+}

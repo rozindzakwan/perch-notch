@@ -64,6 +64,8 @@ pub struct Frame {
     pub layout: Option<(f32, f32)>,
     /// Shadow blur in logical px (0 = none).
     pub shadow: f32,
+    /// Opacity of hover highlights (fades in when the hovered item changes).
+    pub hover_alpha: f32,
 }
 
 impl Frame {
@@ -88,6 +90,7 @@ impl Frame {
             inset: (0.0, 0.0, 0.0, 0.0),
             layout: None,
             shadow: 0.0,
+            hover_alpha: 1.0,
         }
     }
 }
@@ -160,6 +163,7 @@ impl Renderer {
         });
         let mut ctx = Ctx::new(pm, &mut self.text, &mut self.fx, pal, s);
         ctx.cursor = frame.cursor;
+        ctx.hover = frame.hover_alpha.clamp(0.0, 1.0);
         glass::surface(&mut ctx, panel, r, None, 0.0);
 
         if open {
@@ -379,7 +383,8 @@ fn draw_panel(ctx: &mut Ctx<'_>, view: &PanelView, panel: (f32, f32, f32, f32), 
     ] {
         let rect = (bx, by, btn, btn);
         if ctx.hovered(rect) {
-            ctx.rrect(rect, btn / 2.0, ctx.pal.raised[1]);
+            let c = ctx.hover_fill(ctx.pal.raised[1]);
+            ctx.rrect(rect, btn / 2.0, c);
         }
         let color = if active {
             ctx.pal.accent.from
@@ -707,7 +712,8 @@ fn tasks(ctx: &mut Ctx<'_>, t: &TasksView, (x, y, w, h): (f32, f32, f32, f32)) {
         if top + rh <= y + h + 1.0 {
             let rect = (x - 6.0 * s, top, w + 12.0 * s, rh);
             if ctx.hovered(rect) {
-                ctx.rrect(rect, radius::ROW * s, ctx.pal.raised[0]);
+                let c = ctx.hover_fill(ctx.pal.raised[0]);
+                ctx.rrect(rect, radius::ROW * s, c);
             }
             let isz = 14.0 * s;
             ctx.icon(Icon::Plus, x + 7.0 * s, top + (rh - isz) / 2.0, isz, muted);

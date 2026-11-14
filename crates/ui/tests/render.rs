@@ -651,9 +651,8 @@ fn every_body_renders_in_light_and_dark_with_empty_data() {
                 // look for change rather than for opaque pixels).
                 let (blank, _) = render_body(Body::Empty(String::new()), tab, pal, scale);
                 let header_end = (60.0 * scale) as u32;
-                let text_like = (header_end..pm.height()).any(|y| {
-                    (0..pm.width()).any(|x| pm.pixel(x, y) != blank.pixel(x, y))
-                });
+                let text_like = (header_end..pm.height())
+                    .any(|y| (0..pm.width()).any(|x| pm.pixel(x, y) != blank.pixel(x, y)));
                 let expects_text = !matches!(tab, Tab::Tools);
                 assert!(
                     !expects_text || text_like,
@@ -663,7 +662,6 @@ fn every_body_renders_in_light_and_dark_with_empty_data() {
         }
     }
 }
-
 
 #[test]
 fn time_bars_are_rounded_gradients() {

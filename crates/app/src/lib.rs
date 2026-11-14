@@ -20,6 +20,7 @@ pub mod lyrics;
 #[cfg(feature = "mail")]
 pub mod mail;
 pub mod model;
+pub mod motion;
 pub mod persist;
 pub mod shell;
 #[cfg(feature = "speech")]

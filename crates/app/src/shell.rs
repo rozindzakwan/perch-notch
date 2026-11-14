@@ -125,6 +125,12 @@ pub struct Shell {
     layout_px: (f32, f32),
     /// The cursor is over the pill window (for hover states).
     cursor_inside: bool,
+    /// Tab slide, size springs, hover fade.
+    motion: crate::motion::UiMotion,
+    /// Index of the hit under the cursor (hover fade restarts on change).
+    hovered_hit: Option<usize>,
+    /// The OS asks for reduced motion.
+    reduced: bool,
 }
 
 impl Shell {
@@ -136,11 +142,12 @@ impl Shell {
         proxy: EventLoopProxy<UserEvent>,
         started: Instant,
     ) -> Self {
+        let reduced = crate::sys::prefers_reduced_motion();
         let now = Now::real();
         let notch = Notch::new(
             Duration::from_millis(u64::from(config.notch.animation_ms)),
             Duration::from_millis(u64::from(config.notch.collapse_delay_ms)),
-            false,
+            reduced,
         );
         let mut model = Model::new(config, now);
         let data_dir = persist::data_dir();
@@ -190,6 +197,9 @@ impl Shell {
             inset: (0.0, 0.0, 0.0, 0.0),
             layout_px: (0.0, 0.0),
             cursor_inside: false,
+            motion: crate::motion::UiMotion::new(reduced),
+            hovered_hit: None,
+            reduced,
         }
     }
 
@@ -208,10 +218,15 @@ impl Shell {
         let min = geo.collapsed.0;
         let max = min.max(320);
         if let Some(r) = &mut self.renderer {
-            let want = r.pill_width(&self.model.collapsed(), scale);
-            geo.collapsed.0 = want.clamp(min, max);
+            let want = r.pill_width(&self.model.collapsed(), scale).clamp(min, max);
+            self.motion
+                .target_size(want as f32, self.model.panel_height_hint() as f32);
+        } else {
+            self.motion
+                .target_size(min as f32, self.model.panel_height_hint() as f32);
         }
-        geo.expanded.1 = self.model.panel_height_hint();
+        geo.collapsed.0 = self.motion.width().round().max(1.0) as u32;
+        geo.expanded.1 = self.motion.height().round().max(1.0) as u32;
         geo
     }
 
@@ -339,6 +354,14 @@ impl Shell {
             12.0
         };
         frame.cursor = cursor;
+        frame.hover_alpha = self.motion.hover_alpha();
+        if let Some(i) = view
+            .tab
+            .and_then(|t| view.tabs.iter().position(|x| *x == t))
+        {
+            self.motion.target_tab(i as f32);
+            frame.tab_x = self.motion.tab_x();
+        }
         if frame.opaque {
             let s = scale;
             let r = corner_radius.map(|r| r * s).unwrap_or(if progress >= 0.5 {
@@ -473,7 +496,7 @@ impl Shell {
             self.notch = Notch::new(
                 Duration::from_millis(u64::from(cfg.notch.animation_ms)),
                 Duration::from_millis(u64::from(cfg.notch.collapse_delay_ms)),
-                false,
+                self.reduced,
             );
         }
         if old.notch.hide_on_fullscreen != cfg.notch.hide_on_fullscreen && self.fullscreen {
@@ -547,6 +570,12 @@ impl Shell {
     }
 
     fn reload_config(&mut self) {
+        let reduced = crate::sys::prefers_reduced_motion();
+        if reduced != self.reduced {
+            self.reduced = reduced;
+            self.notch.set_reduced_motion(reduced);
+            self.motion.set_reduced(reduced);
+        }
         let (cfg, problem) = self.store.load_or_default();
         if let Some(p) = problem {
             log::warn!("config problem, using defaults where needed: {p}");
@@ -1203,6 +1232,9 @@ impl Shell {
         if let Some(at) = self.reload_at {
             take(at.saturating_duration_since(now));
         }
+        if let Some(d) = self.motion.next_deadline() {
+            take(d);
+        }
         el.set_control_flow(match next {
             Some(d) => ControlFlow::WaitUntil(now + d),
             None => ControlFlow::Wait,
@@ -1402,6 +1434,15 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
             WindowEvent::CursorMoved { position, .. } if id == pill_id => {
                 self.cursor = (position.x as f32, position.y as f32);
+                let (cx, cy) = self.cursor;
+                let hovered = self
+                    .hits
+                    .iter()
+                    .position(|h| cx >= h.x && cy >= h.y && cx < h.x + h.w && cy < h.y + h.h);
+                if hovered != self.hovered_hit {
+                    self.hovered_hit = hovered;
+                    self.motion.hover_changed();
+                }
                 if self.expanded() {
                     // Hover highlights follow the pointer.
                     self.request_redraw();
@@ -1478,9 +1519,11 @@ impl ApplicationHandler<UserEvent> for Shell {
         }
         let dt = now.saturating_duration_since(self.last_anim);
         self.last_anim = now;
+        let was_moving = self.motion.next_deadline().is_some();
+        self.motion.step(dt);
         let was = self.notch.state();
         let needs_redraw = self.notch.advance(dt);
-        if needs_redraw || self.notch.state() != was {
+        if needs_redraw || self.notch.state() != was || was_moving {
             self.place();
             self.request_redraw();
         }

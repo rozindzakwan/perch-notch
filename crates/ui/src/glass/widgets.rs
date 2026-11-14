@@ -146,7 +146,8 @@ pub fn row(
     }
     let hovered = ctx.hovered(rect);
     if hovered {
-        ctx.rrect(rect, radius::ROW * s, ctx.pal.raised[0]);
+        let c = ctx.hover_fill(ctx.pal.raised[0]);
+        ctx.rrect(rect, radius::ROW * s, c);
     }
     let pad = 6.0 * s;
     let d = 28.0 * s;

@@ -98,3 +98,19 @@ pub fn paste() -> perch_core::Result<()> {
         Err(perch_core::Error::unavailable("paste", "no backend"))
     }
 }
+
+/// The OS asks apps to reduce motion (read at start and on config reload).
+pub fn prefers_reduced_motion() -> bool {
+    #[cfg(windows)]
+    {
+        perch_platform_windows::services::prefers_reduced_motion()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        perch_platform_linux::services::prefers_reduced_motion()
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        false
+    }
+}

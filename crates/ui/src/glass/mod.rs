@@ -70,6 +70,8 @@ pub struct Ctx<'a> {
     pub cursor: Option<(f32, f32)>,
     /// Opacity applied to everything drawn (content fades).
     pub alpha: f32,
+    /// Opacity of hover highlights.
+    pub hover: f32,
     /// Hit regions recorded so far.
     pub hits: Vec<Hit>,
 }
@@ -91,6 +93,7 @@ impl<'a> Ctx<'a> {
             s: if s.is_finite() && s > 0.0 { s } else { 1.0 },
             cursor: None,
             alpha: 1.0,
+            hover: 1.0,
             hits: Vec::new(),
         }
     }
@@ -99,6 +102,13 @@ impl<'a> Ctx<'a> {
     pub fn fade(&self, c: Color, extra: f32) -> Color {
         let mut c = c;
         c.apply_opacity((self.alpha * extra).clamp(0.0, 1.0));
+        c
+    }
+
+    /// A hover highlight colour at the current hover fade.
+    pub fn hover_fill(&self, c: Color) -> Color {
+        let mut c = c;
+        c.apply_opacity(self.hover);
         c
     }
 

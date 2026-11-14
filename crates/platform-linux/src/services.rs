@@ -147,3 +147,23 @@ pub fn send_paste() -> Result<()> {
         .map_err(|e| Error::backend(format!("flush: {e}")))?;
     Ok(())
 }
+
+/// Whether the desktop asks apps to reduce motion: Cinnamon's, then GNOME's
+/// `enable-animations` set to false. Errors (no gsettings, no schema) count
+/// as "no".
+pub fn prefers_reduced_motion() -> bool {
+    for schema in [
+        "org.cinnamon.desktop.interface",
+        "org.gnome.desktop.interface",
+    ] {
+        let out = std::process::Command::new("gsettings")
+            .args(["get", schema, "enable-animations"])
+            .output();
+        if let Ok(o) = out {
+            if o.status.success() {
+                return String::from_utf8_lossy(&o.stdout).trim() == "false";
+            }
+        }
+    }
+    false
+}
