@@ -23,11 +23,23 @@
 
 .PARAMETER OutDir
   Where to write the screenshot and the results file.
+
+.PARAMETER IdleSeconds
+  Start only after this long without keyboard or mouse input (default 60).
+
+.PARAMETER MaxWaitMinutes
+  Give up waiting for an idle machine after this long; exits 3 ("skipped").
+
+.PARAMETER SkipIdleCheck
+  Start at once (CI runners, where nobody is at the keyboard).
 #>
 [CmdletBinding()]
 param(
     [string]$Exe,
-    [string]$OutDir
+    [string]$OutDir,
+    [int]$IdleSeconds = 60,
+    [int]$MaxWaitMinutes = 20,
+    [switch]$SkipIdleCheck
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,6 +55,13 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
 if (-not (Test-Path $Exe)) { throw "perch.exe not found at $Exe - build it first" }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+
+# This test moves the mouse and briefly owns the clipboard: only run it while
+# nobody is using the machine.
+. (Join-Path $scriptDir 'lib-idle.ps1')
+if (-not $SkipIdleCheck -and -not (Wait-UserIdle -Seconds $IdleSeconds -MaxMinutes $MaxWaitMinutes)) {
+    exit 3
+}
 
 # --- Win32 interop: window enumeration, styles, and synthetic mouse input ----
 if (-not ([System.Management.Automation.PSTypeName]'PerchNative').Type) {
@@ -157,13 +176,14 @@ function Move-MouseAbsolute([int]$X, [int]$Y) {
 }
 
 function Save-TopStripScreenshot([string]$Path) {
-    # Only the notch area: never capture the rest of the user's screen.
-    $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-    $w = [Math]::Min(560, $screen.Width); $h = [Math]::Min(220, $screen.Height)
-    $x0 = [int]($screen.Width / 2 - $w / 2)
+    # Only the pill window itself: never capture the rest of the user's
+    # screen (the open panel is tall, so a fixed strip would take in other
+    # windows around it).
+    $r = Get-LiveRect $script:pillHandle
+    $w = [Math]::Max(1, $r.W); $h = [Math]::Max(1, $r.H)
     $bmp = New-Object System.Drawing.Bitmap $w, $h
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen($x0, 0, 0, 0, (New-Object System.Drawing.Size $w, $h))
+    $g.CopyFromScreen($r.X, $r.Y, 0, 0, (New-Object System.Drawing.Size $w, $h))
     $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
     $g.Dispose(); $bmp.Dispose()
 }
@@ -237,6 +257,7 @@ try {
     $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
     $parkX = 40
     $parkY = $screen.Height - 80
+    $script:pillHandle = $pill.Handle
     $pillHandle = $pill.Handle
     Move-MouseAbsolute $parkX $parkY
     Start-Sleep -Milliseconds 1500
@@ -277,6 +298,25 @@ try {
     Invoke-Perch @('todo', 'smoke', 'test', 'item'); Start-Sleep -Milliseconds 600
     $st = Read-Status
     Check 'cli_todo' ($st.todos -eq 1) "todos=$($st.todos)"
+
+    # --- a to-do falling due shows as a banner, then goes away ---------------
+    Invoke-Perch @('todo', '+2s', 'Smoke', 'banner')
+    $shown = ''
+    for ($i = 0; $i -lt 60; $i++) {
+        $st = Read-Status
+        if ($st -and $st.banner) { $shown = $st.banner; break }
+        Start-Sleep -Milliseconds 100
+    }
+    Check 'todo_due_banners' ([bool]$shown) "banner '$shown'"
+    Start-Sleep -Milliseconds 400
+    Save-TopStripScreenshot (Join-Path $OutDir 'perch-banner.png')
+    $gone = $false
+    for ($i = 0; $i -lt 80; $i++) {
+        $st = Read-Status
+        if ($st -and -not $st.banner) { $gone = $true; break }
+        Start-Sleep -Milliseconds 100
+    }
+    Check 'banner_goes_away' $gone "banner cleared within 8 s"
     Check 'first_frame_fast' ($st.first_frame_ms -lt 300) "first frame $($st.first_frame_ms) ms after process start (target < 300)"
 
     # --- clipboard board: record copies, never password-manager copies ------
@@ -312,7 +352,13 @@ try {
     [PerchNative]::SetForegroundWindow($form.Handle) | Out-Null
     for ($i = 0; $i -lt 10; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
     $isFg = ([PerchNative]::GetForegroundWindow() -eq $form.Handle)
-    $st = Read-Status
+    # The shell's quiet state can lag the foreground change; Perch re-checks
+    # 1.5 s later, so allow up to 3 s.
+    for ($i = 0; $i -lt 20; $i++) {
+        $st = Read-Status
+        if ($st -and $st.visible -eq $false) { break }
+        [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100
+    }
     if ($isFg) {
         Check 'fullscreen_hides' ($st.visible -eq $false) "visible=$($st.visible)"
     } else {

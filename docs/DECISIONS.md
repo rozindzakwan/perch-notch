@@ -324,7 +324,10 @@ contain only the spike's two windows.
 | (c) no idle CPU | **Yes.** 0 ms of CPU over 4 s idle in every mode. |
 
 **Decision.** Blur stays off on every platform: the palette always uses the
-no-blur alphas (`Palette::resolve(.., blur = false)`), and there is no
+no-blur alphas (`Palette::resolve(.., blur = false)`). They were raised from
+the spec's 0.88 (dark) / 0.92 (light) to 0.94 / 0.96 after a Windows smoke
+capture showed text from the window behind reading through the open panel.
+There is no
 `[appearance] blur` setting, since a switch that can't do anything would only
 confuse. `Frame.blur` and the blur alphas stay in place for when it becomes
 possible. Things that could change this:
@@ -338,3 +341,61 @@ possible. Things that could change this:
 The settings window uses `apply_mica` (Mica backdrop on its title bar and a
 dark title bar in the dark theme). That works because it is an ordinary
 decorated window, where none of the problems above apply.
+
+## ADR-019: Glass UI
+
+The first UI was plain: flat fills, DejaVu text, letters for icons, linear
+timing. The redesign (spec `docs/superpowers/specs/2026-11-14-glass-ui-design.md`,
+chosen as "A · Glass" from three browser mockups) keeps the software renderer
+from ADR-001 and builds the look from a few cached primitives:
+
+- **Tokens.** One palette per theme (`theme.rs`: surface, three raised
+  levels, hairline border, top highlight, ok/error, and gradients for the
+  accent, mail and tasks) and one set of radii, spacing and type styles
+  (`tokens.rs`). Components only use tokens.
+- **Type.** Inter (Regular/Medium/Bold, SIL OFL) for Latin, Greek and
+  Cyrillic, with DejaVu kept as the fallback for everything Inter lacks
+  (emoji, symbols, more scripts). fontdue builds every glyph outline when it
+  loads a font, and the full files cost 49 MB of RAM, mostly OpenType
+  alternates fontdue can't reach without shaping. So the fonts are subset
+  (`scripts/subset-fonts.sh`: 110 KB per Inter weight), and DejaVu is split
+  in two (common symbols and emoji; other scripts and rare symbols), each
+  parsed only when a character needs it: 18 MB for Latin text, +6 MB once an
+  emoji appears, +6 MB more for another script. Digits can be drawn tabular (fontdue has no
+  OpenType `tnum`, so each digit is centred in the widest digit's advance),
+  so the seek-bar times and the Pomodoro countdown don't jitter.
+- **Icons.** About thirty vector icons on a 24-unit grid, stroked with round
+  caps, so they stay sharp at any scale (`icons.rs`).
+- **Depth.** A soft shadow as a nine-slice blurred mask, cached by radius and
+  blur and stretched to any size, so the opening animation doesn't rebuild
+  it. Album colours (two dominant colours from the cover, `core::palette`)
+  tint the Music panel with a glow that is rendered once per size and colour
+  pair and then blitted.
+- **Motion.** A critically damped spring (ζ = 0.75, overshoot ≤ 4 %) for the
+  notch's open/close, the pill width, the panel height and the tab
+  highlight. Content fades in after 40 % of the open. Every motion is stepped
+  by explicit time and returns its next deadline, so the event loop sleeps
+  as soon as everything settles: idle CPU stays at zero. Animation advances
+  at most once per frame interval, whatever wakes the loop. On X11 each
+  resize comes back as an event, and stepping on every one of them (with
+  microsecond `dt` that the f32 spring couldn't resolve) once turned a
+  banner into a self-feeding busy loop; the spring now integrates in f64.
+  The OS
+  reduced-motion setting (Windows `SPI_GETCLIENTAREAANIMATION`, GNOME/Cinnamon
+  `enable-animations`) snaps everything.
+- **Notifications in the notch.** New mail, due to-dos, Pomodoro phases and
+  reminders show as a banner that grows out of the pill (300×56) for 4 s,
+  pausing while hovered. At most three are queued, and extra mail merges into
+  "N new messages". Banners wait while a fullscreen app is active. System
+  toasts became opt-in (`[notifications] system`).
+- **Windows.** The settings window and dialogs use the same tokens: grouped
+  sections, switches, segmented choices, status dots for mail accounts, and
+  Mica on the Windows 11 title bar. The screenshot toolbar is a glass pill of
+  icon buttons, and the camera mirror has rounded corners.
+
+Budgets, checked by tests: a settled Music panel draws in ≤ 4 ms at 1× and
+≤ 8 ms at 2× (measured 1.9 / 6.5 ms on the Ryzen 7 3800X, release build);
+building a 380×300 shadow at 2× takes < 15 ms once, < 2 ms cached. Idle
+memory is where it was before the redesign (Windows: ~24 MB private);
+`perch.exe` grew from 8.6 to 9.2 MB. Acrylic blur was evaluated and not used
+(ADR-018).

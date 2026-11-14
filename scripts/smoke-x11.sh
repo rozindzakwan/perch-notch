@@ -108,6 +108,7 @@ clipboard = true
 shelf = true
 screen_time = true
 screenshot = true
+pomodoro = true
 CFG
 
 T0=$(date +%s%N)
@@ -164,7 +165,7 @@ sleep 0.8
 read -r X2 Y2 W2 H2 <<<"$(geom)"
 info "hovered: ${W2}x${H2}; state=$(STATUS .state)"
 check hover_expands "$([ "$H2" -gt "$H" ] && [ "$W2" -gt "$W" ] && echo 1 || echo 0)" "${W}x${H} -> ${W2}x${H2}"
-import -window root -crop 560x220+$CROPX+$TOP "$OUT/x11-expanded-$COMP.png" 2>/dev/null || true
+import -window root -crop 560x340+$CROPX+$TOP "$OUT/x11-expanded-$COMP.png" 2>/dev/null || true
 
 xdotool mousemove $CX $((MY + MH * 3 / 4))
 sleep 1
@@ -183,6 +184,17 @@ check cli_toggle_closes "$([ "$(STATUS .state)" = Collapsed ] && echo 1 || echo 
 sleep 0.5
 check cli_todo "$([ "$(STATUS .todos)" = 1 ] && echo 1 || echo 0)" "todos=$(STATUS .todos)"
 
+# A to-do falling due shows as a banner in the notch, then goes away.
+"$BIN" todo +2s Smoke banner
+SHOWN=""
+for _ in $(seq 60); do SHOWN=$(STATUS .banner); [ -n "$SHOWN" ] && break; sleep 0.1; done
+check todo_due_banners "$([ -n "$SHOWN" ] && echo 1 || echo 0)" "banner='$SHOWN'"
+sleep 0.4
+import -window root -crop 560x100+$CROPX+$TOP "$OUT/x11-banner-$COMP.png" 2>/dev/null || true
+GONE=0
+for _ in $(seq 80); do [ -z "$(STATUS .banner)" ] && { GONE=1; break; }; sleep 0.1; done
+check banner_goes_away "$GONE" "$([ "$GONE" = 1 ] && echo 'cleared within 8 s' || echo "still '$(STATUS .banner)'")"
+
 # Now playing over MPRIS, end to end (mock player -> D-Bus -> Perch), driven
 # with playerctl like a real desktop would. Needs a session bus.
 MOCK=${PERCH_MOCK_PLAYER:-}
@@ -191,6 +203,8 @@ if [ -n "$MOCK" ] && [ -x "$MOCK" ] && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; t
     PIDS+=($!)
     for _ in $(seq 50); do [ "$(STATUS .track)" = "Smoke Band - Smoke Song" ] && break; sleep 0.1; done
     check mpris_track "$([ "$(STATUS .track)" = "Smoke Band - Smoke Song" ] && echo 1 || echo 0)" "track='$(STATUS .track)'"
+    # A track change updates the pill quietly: no banner.
+    check track_change_no_banner "$([ -z "$(STATUS .banner)" ] && echo 1 || echo 0)" "banner='$(STATUS .banner)'"
     playerctl --player=perchmock play-pause || info "playerctl failed"
     for _ in $(seq 30); do [ "$(STATUS .playing)" = false ] && break; sleep 0.1; done
     check mpris_playerctl_pause "$([ "$(STATUS .playing)" = false ] && echo 1 || echo 0)" "playing=$(STATUS .playing)"
@@ -199,7 +213,7 @@ if [ -n "$MOCK" ] && [ -x "$MOCK" ] && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; t
     check mpris_cli_resume "$([ "$(STATUS .playing)" = true ] && echo 1 || echo 0)" "playing=$(STATUS .playing)"
     xdotool mousemove $CX $TOP
     sleep 0.8
-    import -window root -crop 560x220+$CROPX+$TOP "$OUT/x11-media-$COMP.png" 2>/dev/null || true
+    import -window root -crop 560x340+$CROPX+$TOP "$OUT/x11-media-$COMP.png" 2>/dev/null || true
     xdotool mousemove $((MX + 40)) $AWAY
     sleep 0.8
 else
@@ -224,12 +238,23 @@ if [ -n "$CLIP_OWNER" ] && [ -x "$CLIP_OWNER" ]; then
     "$BIN" tab clips
     xdotool mousemove $CX $TOP
     sleep 0.8
-    import -window root -crop 560x220+$CROPX+$TOP "$OUT/x11-clipboard-$COMP.png" 2>/dev/null || true
+    import -window root -crop 560x340+$CROPX+$TOP "$OUT/x11-clipboard-$COMP.png" 2>/dev/null || true
     xdotool mousemove $((MX + 40)) $AWAY
     sleep 0.8
 else
     info "clipboard end-to-end skipped (set PERCH_CLIP_OWNER)"
 fi
+
+# Every tab, pinned open, as visual evidence of the panel design.
+"$BIN" toggle-notch
+sleep 0.8
+for t in music tasks clips shelf time tools; do
+    "$BIN" tab "$t"
+    sleep 0.6
+    import -window root -crop 560x340+$CROPX+$TOP "$OUT/x11-tab-$t-$COMP.png" 2>/dev/null || true
+done
+"$BIN" toggle-notch
+sleep 0.8
 
 # Screenshot: open the overlay from the CLI, drag a region, Enter copies it.
 "$BIN" shot
@@ -293,6 +318,17 @@ TICKS=$(getconf CLK_TCK)
 info "VmRSS $((RSS_KB / 1024)) MB; CPU over 10 s idle: $(( (T_B - T_A) * 1000 / TICKS )) ms"
 check idle_rss_under_40mb "$([ "$RSS_KB" -lt 40960 ] && echo 1 || echo 0)" "$((RSS_KB / 1024)) MB"
 check idle_cpu_near_zero "$([ $((T_B - T_A)) -le 2 ] && echo 1 || echo 0)" "$((T_B - T_A)) ticks in 10 s"
+if [ $((T_B - T_A)) -gt 2 ]; then
+    # Which thread is busy, for the failure report.
+    for t in /proc/"$PID"/task/*; do printf '%s\t%s\n' "${t##*/}" "$(awk '{print $14 + $15}' "$t/stat")"; done >"$TMP/t1"
+    sleep 2
+    for t in /proc/"$PID"/task/*; do
+        a=$(awk -F'\t' -v id="${t##*/}" '$1 == id {print $2}' "$TMP/t1")
+        b=$(awk '{print $14 + $15}' "$t/stat")
+        [ $((b - ${a:-0})) -gt 0 ] && info "busy thread $(cat "$t/comm"): $((b - ${a:-0})) ticks in 2 s"
+    done
+    info "last log lines:"; tail -5 "$TMP/perch.log" | tee -a "$RESULTS"
+fi
 
 "$BIN" quit
 for _ in $(seq 30); do kill -0 "$PID" 2>/dev/null || break; sleep 0.1; done

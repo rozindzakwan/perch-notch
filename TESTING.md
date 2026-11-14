@@ -19,7 +19,8 @@ Environments:
 | `cargo fmt --all --check` | Windows, container | clean |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Windows (default features; GNU can't build `speech`) | clean (0 warnings) |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | container | clean (0 warnings) |
-| `cargo test --workspace` | Windows | 316 passed, 0 failed, 5 ignored (opt-in hardware tests, run separately below) |
+| `cargo test --workspace` | Windows | 388 passed, 0 failed, 7 ignored (opt-in hardware tests, run separately below, and the release-only render budget) |
+| `cargo test --release -p perch-ui --test budget` | Windows | settled Music panel: **1.9 ms at 1×, 6.5 ms at 2×** (budgets 4 / 8 ms) |
 | `cargo test --workspace --all-features --locked` | container | all passed, 0 failed |
 | `cargo audit` | Windows | 0 vulnerabilities; 7 warnings: 6 unmaintained crates (paste, proc-macro-error, ttf-parser, zbus_names, zvariant, zvariant_derive) and `glib` 0.18 "unsound", which is only in the lockfile through `tray-icon`'s Linux GTK deps and is never compiled (tray-icon is Windows-only here; Linux uses ksni) |
 
@@ -38,8 +39,15 @@ What the tests cover (`cargo test` lists each one):
   picker, checksums and resampling. Opt-in tests that touch hardware are
   `#[ignore]`d: `audio` (makes sound), `camera` (switches the webcam on),
   `speech` end to end (downloads a model).
-- **ui**: screenshot overlay state (selection, crop, pen/arrow/text, copy),
-  mirror math, rendering of each panel tab without a window.
+- **ui**: screenshot overlay state (selection, crop, pen/arrow/text, copy)
+  and its glass toolbar, the rounded mirror frame, rendering of each panel
+  tab, the pill and banners without a window, glass components (rows,
+  sliders, switches), icons inside their boxes, cached shadows and glow,
+  fonts (Inter with lazily loaded fallback, tabular digits, eliding), the
+  settings form (groups, segmented choices, status rows, masked secrets).
+- **motion**: the spring (overshoot, settling, microsecond steps), the
+  notch open/close timing, tab and size motion, reduced motion, the banner
+  queue (4 s, hover pause, merging, cap of three).
 - **platform-linux** (container, private bus): MPRIS against a mock player,
   notifications and screen-lock signals (`--test mpris --test session_bus`),
   PulseAudio per-app volume against a null sink (`scripts/pulse-test.sh`).
@@ -50,21 +58,27 @@ Real windows, real synthetic input (`SendInput`), real SMTC. The scripts check
 that the mouse is idle before they start and never screenshot more than the
 notch area.
 
-### `scripts/smoke-windows.ps1`: 26/26 passed
+### `scripts/smoke-windows.ps1`: 28/28 passed
+
+It waits until the keyboard and mouse have been idle for 60 s (`scripts/lib-idle.ps1`),
+so it never fights a person at the machine, and captures only the pill window.
 
 Checks, in order: windows created; the pill and the 2 px hover strip exist with
 `TOOLWINDOW|NOACTIVATE|TOPMOST` and no `APPWINDOW` (no taskbar/Alt-Tab);
-hovering expands 200×32 → 440×132 and leaving collapses back; CLI
-`toggle-notch` pins open and closes; CLI `todo`; first frame < 300 ms
-(**87 ms**); clipboard records a normal copy, **skips a copy marked
+hovering expands 200×32 → 404×248 (380×236 plus the shadow margin) and
+leaving collapses back; CLI `toggle-notch` pins open and closes; CLI `todo`;
+**a to-do due in 2 s shows a banner that goes away by itself**; first frame
+< 300 ms (**85 ms**); clipboard records a normal copy, **skips a copy marked
 `ExcludeClipboardContentFromMonitorProcessing`**, then records the next one; a
 fullscreen window hides the pill and leaving fullscreen shows it again; screen
 time records the foreground app; the screenshot overlay opens, copies an image
 and closes; Perch **never takes the foreground**; idle private bytes
-**29.0 MB** (< 40 MB) after all of that.
+**26.5 MB** (< 40 MB) after all of that. (The fullscreen check now polls for
+up to 3 s: Perch re-checks the shell state 1.5 s after a focus change, and a
+fixed 1 s wait failed once.)
 
 Evidence: `artifacts/windows/smoke-results.json`, `perch-collapsed.png`,
-`perch-expanded.png`.
+`perch-expanded.png`, `perch-banner.png`.
 
 ### `scripts/smoke-media-windows.ps1`: 5/5 passed
 
@@ -127,12 +141,14 @@ All of it: `scripts/test-installer-windows.ps1`, 11/11 passed.
 
 `scripts/linux-ci.sh all` = `check test build smoke mpris pulse mail deb debinstall`.
 
-### X11 smoke (`scripts/smoke-x11.sh`): 32/32 passed, without and with picom
+### X11 smoke (`scripts/smoke-x11.sh`): 35/35 passed, without and with picom
 
 Checks: the pill and the hover strip are `_NET_WM_WINDOW_TYPE_DOCK` with
 `ABOVE + STICKY + SKIP_TASKBAR + SKIP_PAGER` and no strut; the collapsed pill is at
-the top centre; `xdotool` hover expands to 480×200 and
-leaving collapses; CLI over the Unix socket (toggle, todo, tab); **MPRIS
+the top centre; `xdotool` hover expands 200×32 → 380×236 (404×248 with
+the shadow margin under picom) and leaving collapses; a to-do due in 2 s
+**shows a banner, which goes away by itself**, while a track change shows
+none; CLI over the Unix socket (toggle, todo, tab); **MPRIS
 end to end** (mock player → D-Bus → Perch, paused with `playerctl`, resumed
 with `perch play-pause`); clipboard records `xclip` copies and **skips a
 KeePassXC-style `x-kde-passwordManagerHint` owner**; the screenshot overlay
@@ -141,10 +157,31 @@ un-fullscreen shows; screen time records apps; **`openbox --replace` (a WM
 restart) keeps `_NET_WM_STATE_ABOVE`**; idle RSS < 40 MB and 0 CPU ticks in
 10 s; `perch quit` exits cleanly.
 
-Measured: first frame 60–66 ms; idle RSS 36 MB after the whole run.
+Measured: first frame 61–86 ms; idle RSS 36 MB and 0 ms CPU over 10 s after
+the whole run. Every tab is captured pinned open (`x11-tab-*.png`); the
+README screenshots are crops of these.
 
 Evidence: `artifacts/linux/x11-smoke-{none,picom}.txt` and cropped
 `x11-*-{none,picom}.png`.
+
+Bugs the Glass UI runs found (fixed, with tests):
+
+- **Busy loop after a banner on X11** (idle check: 191 CPU ticks in 10 s,
+  ~90 % of a core). Each window resize comes back as a ConfigureNotify, so
+  the loop woke every few microseconds and stepped the f32 spring with a
+  `dt` it couldn't resolve. The value froze short of the target, the spring
+  never settled, and the loop fed itself. Found by bisecting the smoke steps
+  and a per-thread CPU dump (now part of the smoke's failure output). Fixed
+  by integrating the spring in f64 (`microsecond_steps_still_settle`) and
+  advancing animation at most once per frame.
+- **Idle memory doubled** (Windows 24 → 56 MB, Linux 36 → 69 MB): fontdue
+  keeps every glyph outline, and the full Inter weights plus DejaVu cost
+  49 MB. The fonts are subset (`scripts/subset-fonts.sh`) and DejaVu is
+  split in two (symbols and emoji; other scripts) and each part is loaded
+  only when needed (`fallback_is_parsed_only_when_a_character_needs_it`):
+  back to 24 MB / 36 MB, +6 MB once an emoji appears.
+- **Album glow cost 9 ms per frame at 2×**, caught by the render budget test.
+  It is now rendered once per size and colour pair and then blitted.
 
 ### Other Linux stages
 
@@ -187,8 +224,8 @@ Linux container.
 | forms: add-account dialog round trip, validation, presets fill server/port, masked password field | both | 2 passed (+1 mask test in `perch-ui`) |
 | keychain round trip, Windows Credential Manager (`platform-windows` unit test, throwaway `Perch/test:*` item) | Windows | passed |
 | keychain round trip, Secret Service (`platform-linux --test secrets`, throwaway GNOME Keyring on a private bus) | container | passed |
-| `scripts/mail-test.sh` (Perch release build vs. Dovecot, under Xvfb, password via `perch mail-password` into GNOME Keyring) | container | **17/17**: password in keyring and not in config; online over **TLS** and **STARTTLS** (private CA via `ca_file`); 4 unread listed; `Jürgen - Halo 😀` decoded; new message **pushed in ~620 ms**; **0 of 3 messages `\Seen` on the server**; wrong password reported, exactly one attempt per account; feature off closes all connections; add-account dialog opened with `perch mail-add`, **typed into with xdotool**, account saved, typed password in keyring only, dialog closed, account online; RSS 36 MB |
-| `scripts/mail-test-windows.ps1` (`perch.exe` vs. the same Dovecot on `localhost:1993`) | Windows | **10/10**: password in Credential Manager and not in config; online over TLS; 2 unread; subjects decoded; new message pushed in ~650 ms; 0 of 3 `\Seen`; 26.9 MB private; quits cleanly; test credential removed |
+| `scripts/mail-test.sh` (Perch release build vs. Dovecot, under Xvfb, password via `perch mail-password` into GNOME Keyring) | container | **19/19**: password in keyring and not in config; online over **TLS** and **STARTTLS** (private CA via `ca_file`); 4 unread listed; `Jürgen - Halo 😀` decoded; new message **pushed in ~640 ms**, shown as a **banner that goes away by itself**; **0 of 3 messages `\Seen` on the server**; wrong password reported, exactly one attempt per account; feature off closes all connections; add-account dialog opened with `perch mail-add`, **typed into with xdotool**, account saved, typed password in keyring only, dialog closed, account online; RSS 41 MB (three accounts, and an emoji subject loads the symbols font) |
+| `scripts/mail-test-windows.ps1` (`perch.exe` vs. the same Dovecot on `localhost:1993`) | Windows | **10/10**: password in Credential Manager and not in config; online over TLS; 2 unread; subjects decoded; new message pushed in ~700 ms; 0 of 3 `\Seen`; 25.2 MB private; quits cleanly; test credential removed |
 
 Bugs these runs found (fixed, with tests):
 

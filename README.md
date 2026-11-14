@@ -58,6 +58,15 @@ StatusNotifierItem with an XEmbed fallback), a settings window, live reload of
 the config file, start-at-login, a hide-while-fullscreen option, global
 hotkeys, and a command line that talks to the running instance.
 
+Notifications (new mail, due to-dos, Pomodoro phases, reminders) appear as a
+**banner that grows out of the pill** for four seconds; hover it to keep it,
+click it to open the matching tab. They wait while a fullscreen app is
+active. System notifications are off by default and can be turned on in
+settings (`[notifications] system = true`).
+
+![A to-do banner in the notch](docs/img/banner.png)
+
+![Tasks tab with the Pomodoro ring](docs/img/panel-tasks.png)
 ![Clipboard tab](docs/img/panel-clips.png)
 
 ## Platform support
@@ -171,6 +180,7 @@ perch toggle-notch         open/close the panel
 perch pin                  keep the panel open until pinned again
 perch tab clips            open a tab: music tasks clips shelf mixer sounds time tools
 perch todo "buy milk"      add a to-do
+perch todo +10m Call Ann   ... due in 10 minutes (also +30s, +2h or 14:30)
 perch pomodoro             start/stop the Pomodoro timer
 perch play-pause | next | previous
 perch shot                 screenshot
@@ -217,6 +227,10 @@ screenshot = false
 camera_mirror = false
 speech_to_text = false     # perch-speech build; downloads a model once
 mail = false               # network: your IMAP servers, read-only
+
+[notifications]
+in_notch = true            # banners inside the notch
+system = false             # also Windows toasts / desktop notifications
 
 [hotkeys]
 toggle_notch = "Ctrl+Alt+N"
@@ -294,26 +308,28 @@ machines and environments, so they're listed separately.
 
 | Metric | Result | Source |
 |---|---|---|
-| Cold start (process start → first frame on screen) | 84–109 ms | `smoke-windows.ps1`; the app's own timer |
-| Idle private memory, default features | 23–25 MB | smoke test |
-| Idle private memory, 7 features on (media, to-do, Pomodoro, clipboard, shelf, reminders, screen time) | ~31 MB | 30-min soak |
+| Cold start (process start → first frame on screen) | 85 ms (84–109 ms over all runs) | `smoke-windows.ps1`; the app's own timer |
+| Idle private memory, default features | 24–26.5 MB (after opening every tab) | smoke test |
+| Idle private memory, 7 features on (media, to-do, Pomodoro, clipboard, shelf, reminders, screen time) | ~25–31 MB | 10- and 30-min soaks |
+| Render time, settled Music panel | 1.9 ms at 1×, 6.5 ms at 2× (budget 4 / 8 ms) | `tests/budget.rs`, release |
 | Idle CPU | 0 % (median 10 s interval ≤ 1 timer tick) | soak |
 | 30-min soak, leak check (machine in use) | PASS: private bytes −0.1 MB, handles +14, GDI/USER flat | `soak-windows.ps1` |
-| Idle private memory, mail on (one account, signed in, idling) | 26.9 MB | `mail-test-windows.ps1` |
-| `perch.exe` size (all default features) | 8.6 MB (mail adds 0.35 MB) | release build, GNU toolchain |
-| Installer / portable zip | 3.2 MB / 4.0 MB | `package-windows.ps1` |
+| 10-min soak after the Glass UI | PASS: private bytes +0.01 MB, handles −2, GDI/USER flat, CPU at rest 0 % | `soak-windows.ps1 -Minutes 10` |
+| Idle private memory, mail on (one account, signed in, idling) | 25.2 MB | `mail-test-windows.ps1` |
+| `perch.exe` size (all default features) | 8.8 MB (fonts subset; mail adds 0.35 MB) | release build, GNU toolchain |
+| Installer / portable zip | 3.5 MB / 4.3 MB | `package-windows.ps1` |
 
 ### Linux (ubuntu-22.04 container: Xvfb + openbox, 8 vCPUs on the same host)
 
 | Metric | Result | Source |
 |---|---|---|
-| Cold start (first frame) | ~60–66 ms | `smoke-x11.sh` |
-| Idle RSS after the full smoke run (6 features, screenshot used) | ~36 MB | smoke test |
+| Cold start (first frame) | 61–86 ms | `smoke-x11.sh` |
+| Idle RSS after the full smoke run (7 features, every tab opened, screenshot used) | ~36 MB | smoke test |
 | Idle RSS, 7 everyday features | ~34 MB | 30-min soak |
 | Idle CPU | 0 ticks in 10 s | smoke test + soak |
 | 30-min soak, leak check | PASS: RSS +1.1 MB, fds flat, CPU at rest 0 % | `soak-linux.sh` |
-| Idle RSS, mail on (three accounts signed in) | ~36 MB | `mail-test.sh` |
-| `perch` binary size / `.deb` | 12.3 MB / 4.2 MB | release build, `cargo deb` |
+| Idle RSS, mail on (three accounts signed in; an emoji subject loads the symbols font) | ~41 MB | `mail-test.sh` |
+| `perch` binary size / `.deb` | 12.5 MB / 4.5 MB | release build, `cargo deb` |
 | glibc required | 2.34 | `objdump -T` |
 
 Numbers from real Mint hardware will come from `scripts/mint-test.sh`, which
@@ -458,6 +474,12 @@ The main ones:
 - **NSIS per-user installer**, no admin needed (ADR-008).
 - **Heavy features are optional twice over:** cargo features at build time,
   and off by default at run time (ADR-010).
+- **Glass UI from cached primitives:** tokens, Inter with a DejaVu fallback,
+  vector icons, nine-slice shadows and spring motion that sleeps when
+  settled. Notifications appear as banners inside the notch. The render
+  budget (≤ 4 ms at 1×, ≤ 8 ms at 2×) is checked by a test (ADR-019).
+- **No acrylic blur (yet):** on Windows 11 the backdrop can't be confined
+  to the rounded shape of a per-pixel-transparent window (ADR-018).
 - **Unsafe code** only in thin OS wrappers, each block with a `// SAFETY:`
   comment. `#![forbid(unsafe_code)]` everywhere else.
 

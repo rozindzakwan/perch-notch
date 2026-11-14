@@ -22,13 +22,16 @@
   Where to write results and a screenshot of the expanded notch.
 #>
 [CmdletBinding()]
-param([string]$Exe, [string]$OutDir, [switch]$UseRunningPlayer)
+param([string]$Exe, [string]$OutDir, [switch]$UseRunningPlayer, [int]$IdleSeconds = 60, [int]$MaxWaitMinutes = 20, [switch]$SkipIdleCheck)
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 if (-not $Exe) { $Exe = Join-Path $repo 'target\release\perch.exe' }
 if (-not $OutDir) { $OutDir = Join-Path $repo 'artifacts\windows' }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 Add-Type -AssemblyName System.Drawing
+# It opens a media player and moves the mouse: only while nobody is at the machine.
+. (Join-Path $PSScriptRoot 'lib-idle.ps1')
+if (-not $SkipIdleCheck -and -not (Wait-UserIdle -Seconds $IdleSeconds -MaxMinutes $MaxWaitMinutes)) { exit 3 }
 
 $mockProc = $null
 $expected = $null
@@ -82,13 +85,15 @@ try {
 
     Perch @('toggle-notch')
     Start-Sleep -Milliseconds 700
-    # Only the notch area: never capture the rest of the user's screen.
-    Add-Type -AssemblyName System.Windows.Forms
-    $sw = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width
-    $bmp = New-Object System.Drawing.Bitmap 560, 220
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen([int]($sw / 2 - 280), 0, 0, 0, (New-Object System.Drawing.Size 560, 220))
-    $bmp.Save((Join-Path $OutDir 'perch-media.png')); $g.Dispose(); $bmp.Dispose()
+    # Only the pill window (its live rect from the status file): never
+    # capture the rest of the user's screen.
+    $r = (Status).pill
+    if ($r -and $r.Count -eq 4 -and $r[2] -gt 0 -and $r[3] -gt 0) {
+        $bmp = New-Object System.Drawing.Bitmap ([int]$r[2]), ([int]$r[3])
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.CopyFromScreen([int]$r[0], [int]$r[1], 0, 0, (New-Object System.Drawing.Size ([int]$r[2]), ([int]$r[3])))
+        $bmp.Save((Join-Path $OutDir 'perch-media.png')); $g.Dispose(); $bmp.Dispose()
+    }
     Perch @('toggle-notch')
 
     if ($mockProc) {

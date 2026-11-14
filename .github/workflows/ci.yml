@@ -42,7 +42,7 @@ jobs:
       - name: UI smoke test (hover via SendInput)
         if: matrix.target == 'x86_64-pc-windows-msvc'
         shell: pwsh
-        run: ./scripts/smoke-windows.ps1 -Exe target/${{ matrix.target }}/release/perch.exe -OutDir artifacts/windows
+        run: ./scripts/smoke-windows.ps1 -Exe target/${{ matrix.target }}/release/perch.exe -OutDir artifacts/windows -SkipIdleCheck
       - name: build the dictation variant (perch-speech, whisper.cpp needs MSVC)
         if: matrix.target == 'x86_64-pc-windows-msvc'
         shell: pwsh
