@@ -1,9 +1,10 @@
 //! Glyph rasterisation and a tiny text layout, built on `fontdue`.
 //!
-//! There is no system font enumeration here on purpose: Perch embeds one UI
-//! font so the pill looks identical on Windows and Linux and so startup does no
-//! font-config work. Rasterised glyphs are cached per (char, px) pair, which is
-//! what keeps animated frames cheap.
+//! There is no system font enumeration here on purpose: Perch embeds its UI
+//! fonts so the notch looks identical on Windows and Linux and startup does no
+//! font-config work. Inter (Regular, Medium, Bold) is the UI face; DejaVu Sans
+//! is the fallback for glyphs Inter lacks (symbols, emoji). Rasterised glyphs
+//! are cached per (font, char, size), which keeps animated frames cheap.
 
 use std::collections::HashMap;
 
@@ -11,10 +12,19 @@ use fontdue::{Font, FontSettings};
 use perch_core::error::{Error, Result};
 use tiny_skia::{Color, Pixmap, PremultipliedColorU8};
 
-/// An embedded font plus a glyph cache.
+use crate::tokens::Weight;
+
+const FONT_REGULAR: usize = 0;
+const FONT_MEDIUM: usize = 1;
+const FONT_BOLD: usize = 2;
+const FONT_FALLBACK: usize = 3;
+
+/// The embedded fonts plus a glyph cache.
 pub struct TextRenderer {
-    font: Font,
-    cache: HashMap<(char, u32), Glyph>,
+    fonts: Vec<Font>,
+    cache: HashMap<(usize, char, u32), Glyph>,
+    /// Widest digit advance per (font, size), for tabular numbers.
+    digit_w: HashMap<(usize, u32), f32>,
 }
 
 struct Glyph {
@@ -46,25 +56,62 @@ impl TextMetrics {
     }
 }
 
+fn load(bytes: &'static [u8], name: &str) -> Result<Font> {
+    Font::from_bytes(bytes, FontSettings::default())
+        .map_err(|e| Error::backend(format!("loading the embedded font {name}: {e}")))
+}
+
 impl TextRenderer {
-    /// Load the embedded UI font.
+    /// Load the embedded UI fonts.
     pub fn new() -> Result<Self> {
-        // DejaVu Sans is bundled by the build (see build.rs); it covers Latin,
-        // Cyrillic, Greek and a wide punctuation range.
-        const FONT: &[u8] = include_bytes!("../assets/PerchUI.ttf");
-        let font = Font::from_bytes(FONT, FontSettings::default())
-            .map_err(|e| Error::backend(format!("loading the embedded UI font: {e}")))?;
+        let fonts = vec![
+            load(
+                include_bytes!("../assets/Inter-Regular.ttf"),
+                "Inter Regular",
+            )?,
+            load(include_bytes!("../assets/Inter-Medium.ttf"), "Inter Medium")?,
+            load(include_bytes!("../assets/Inter-Bold.ttf"), "Inter Bold")?,
+            // DejaVu Sans: Latin, Cyrillic, Greek, many symbols and emoticons.
+            load(include_bytes!("../assets/PerchUI.ttf"), "DejaVu Sans")?,
+        ];
         Ok(Self {
-            font,
+            fonts,
             cache: HashMap::new(),
+            digit_w: HashMap::new(),
         })
     }
 
-    fn glyph(&mut self, ch: char, px: f32) -> &Glyph {
-        let key = (ch, px.to_bits());
-        let key = (key.0, px as u32);
+    /// Which font draws `ch` at `weight`: the Inter weight if it has the
+    /// glyph, otherwise the fallback.
+    fn font_for(&self, ch: char, weight: Weight) -> usize {
+        let idx = match weight {
+            Weight::Regular => FONT_REGULAR,
+            Weight::Medium => FONT_MEDIUM,
+            Weight::Bold => FONT_BOLD,
+        };
+        let has = |i: usize| {
+            self.fonts
+                .get(i)
+                .map(|f| f.lookup_glyph_index(ch) != 0)
+                .unwrap_or(false)
+        };
+        if ch.is_whitespace() || has(idx) {
+            idx
+        } else if has(FONT_FALLBACK) {
+            FONT_FALLBACK
+        } else {
+            idx
+        }
+    }
+
+    fn glyph(&mut self, ch: char, px: f32, weight: Weight) -> &Glyph {
+        let font = self.font_for(ch, weight);
+        let key = (font, ch, px.to_bits());
         if !self.cache.contains_key(&key) {
-            let (metrics, coverage) = self.font.rasterize(ch, px);
+            let (metrics, coverage) = match self.fonts.get(font) {
+                Some(f) => f.rasterize(ch, px),
+                None => return unreachable_glyph(),
+            };
             self.cache.insert(
                 key,
                 Glyph {
@@ -85,17 +132,46 @@ impl TextRenderer {
         }
     }
 
-    /// Measure a string without drawing it.
-    pub fn measure(&mut self, s: &str, px: f32) -> TextMetrics {
-        let mut width = 0.0;
-        for ch in s.chars() {
-            width += self.glyph(ch, px).advance;
-        }
-        let line = self.font.horizontal_line_metrics(px);
-        let (ascent, descent) = match line {
+    fn line(&self, px: f32, weight: Weight) -> (f32, f32) {
+        let idx = self.font_for('A', weight);
+        match self
+            .fonts
+            .get(idx)
+            .and_then(|f| f.horizontal_line_metrics(px))
+        {
             Some(m) => (m.ascent, -m.descent),
             None => (px * 0.8, px * 0.2),
-        };
+        }
+    }
+
+    /// Advance of the widest ASCII digit (tabular numbers).
+    fn digit_width(&mut self, px: f32, weight: Weight) -> f32 {
+        let font = self.font_for('0', weight);
+        let key = (font, px.to_bits());
+        if let Some(w) = self.digit_w.get(&key) {
+            return *w;
+        }
+        let w = ('0'..='9')
+            .map(|d| self.glyph(d, px, weight).advance)
+            .fold(0.0_f32, f32::max);
+        self.digit_w.insert(key, w);
+        w
+    }
+
+    fn advance(&mut self, ch: char, px: f32, weight: Weight, tabular: bool) -> f32 {
+        if tabular && ch.is_ascii_digit() {
+            self.digit_width(px, weight)
+        } else {
+            self.glyph(ch, px, weight).advance
+        }
+    }
+
+    fn measure_impl(&mut self, s: &str, px: f32, weight: Weight, tabular: bool) -> TextMetrics {
+        let mut width = 0.0;
+        for ch in s.chars() {
+            width += self.advance(ch, px, weight, tabular);
+        }
+        let (ascent, descent) = self.line(px, weight);
         TextMetrics {
             width,
             ascent,
@@ -103,8 +179,70 @@ impl TextRenderer {
         }
     }
 
-    /// Draw a string with its baseline at `(x, baseline)`, clipped to `max_w`.
-    /// Returns the advance actually used.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_impl(
+        &mut self,
+        pm: &mut Pixmap,
+        s: &str,
+        x: f32,
+        baseline: f32,
+        px: f32,
+        color: Color,
+        max_w: f32,
+        weight: Weight,
+        tabular: bool,
+    ) -> f32 {
+        let mut pen = x;
+        for ch in s.chars() {
+            let cell = self.advance(ch, px, weight, tabular);
+            let (gw, gh, adv, gl, gt, coverage) = {
+                let g = self.glyph(ch, px, weight);
+                (
+                    g.width,
+                    g.height,
+                    g.advance,
+                    g.left,
+                    g.top,
+                    g.coverage.clone(),
+                )
+            };
+            if pen - x + cell > max_w {
+                break;
+            }
+            // Tabular digits sit centred in their fixed-width cell.
+            let shift = (cell - adv) / 2.0;
+            blit(
+                pm,
+                &coverage,
+                gw,
+                gh,
+                pen + shift + gl,
+                baseline - gt,
+                color,
+            );
+            pen += cell;
+        }
+        pen - x
+    }
+
+    /// Measure a string in Inter Medium (the body weight).
+    pub fn measure(&mut self, s: &str, px: f32) -> TextMetrics {
+        self.measure_impl(s, px, Weight::Medium, false)
+    }
+
+    /// Measure a string at a weight.
+    pub fn measure_w(&mut self, s: &str, px: f32, weight: Weight) -> TextMetrics {
+        self.measure_impl(s, px, weight, false)
+    }
+
+    /// Measure with tabular (equal-width) digits.
+    pub fn measure_tabular(&mut self, s: &str, px: f32, weight: Weight) -> TextMetrics {
+        self.measure_impl(s, px, weight, true)
+    }
+
+    /// Draw a string in Inter Medium with its baseline at `(x, baseline)`,
+    /// clipped to `max_w`. Returns the advance actually used.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         pm: &mut Pixmap,
@@ -115,39 +253,57 @@ impl TextRenderer {
         color: Color,
         max_w: f32,
     ) -> f32 {
-        let mut pen = x;
-        for ch in s.chars() {
-            let (gw, gh, adv, gl, gt, coverage) = {
-                let g = self.glyph(ch, px);
-                (
-                    g.width,
-                    g.height,
-                    g.advance,
-                    g.left,
-                    g.top,
-                    g.coverage.clone(),
-                )
-            };
-            if pen - x + adv > max_w {
-                break;
-            }
-            blit(pm, &coverage, gw, gh, pen + gl, baseline - gt, color);
-            pen += adv;
-        }
-        pen - x
+        self.draw_impl(pm, s, x, baseline, px, color, max_w, Weight::Medium, false)
     }
 
-    /// Truncate a string with a trailing ellipsis so it fits `max_w`.
+    /// Draw at a weight.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_w(
+        &mut self,
+        pm: &mut Pixmap,
+        s: &str,
+        x: f32,
+        baseline: f32,
+        px: f32,
+        color: Color,
+        max_w: f32,
+        weight: Weight,
+    ) -> f32 {
+        self.draw_impl(pm, s, x, baseline, px, color, max_w, weight, false)
+    }
+
+    /// Draw with tabular (equal-width) digits.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_tabular(
+        &mut self,
+        pm: &mut Pixmap,
+        s: &str,
+        x: f32,
+        baseline: f32,
+        px: f32,
+        color: Color,
+        max_w: f32,
+        weight: Weight,
+    ) -> f32 {
+        self.draw_impl(pm, s, x, baseline, px, color, max_w, weight, true)
+    }
+
+    /// Truncate a string (Inter Medium) with a trailing ellipsis to fit `max_w`.
     pub fn elide(&mut self, s: &str, px: f32, max_w: f32) -> String {
-        if self.measure(s, px).width <= max_w {
+        self.elide_w(s, px, max_w, Weight::Medium)
+    }
+
+    /// Truncate a string at a weight with a trailing ellipsis to fit `max_w`.
+    pub fn elide_w(&mut self, s: &str, px: f32, max_w: f32, weight: Weight) -> String {
+        if self.measure_w(s, px, weight).width <= max_w {
             return s.to_string();
         }
         let ell = "\u{2026}";
-        let ell_w = self.measure(ell, px).width;
+        let ell_w = self.measure_w(ell, px, weight).width;
         let mut out = String::new();
         let mut w = 0.0;
         for ch in s.chars() {
-            let adv = self.glyph(ch, px).advance;
+            let adv = self.glyph(ch, px, weight).advance;
             if w + adv + ell_w > max_w {
                 break;
             }
@@ -230,4 +386,52 @@ fn unreachable_glyph() -> &'static Glyph {
         top: 0.0,
     };
     &EMPTY
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tokens::Weight;
+
+    #[test]
+    fn latin_uses_inter_and_emoji_falls_back() {
+        let t = TextRenderer::new().unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(t.font_for('A', Weight::Regular), FONT_REGULAR);
+        assert_eq!(t.font_for('A', Weight::Bold), FONT_BOLD);
+        assert_eq!(t.font_for('😀', Weight::Regular), FONT_FALLBACK);
+    }
+
+    #[test]
+    fn bold_is_wider_than_regular() {
+        let mut t = TextRenderer::new().unwrap_or_else(|e| panic!("{e}"));
+        let r = t.measure_w("Perch", 14.0, Weight::Regular).width;
+        let b = t.measure_w("Perch", 14.0, Weight::Bold).width;
+        assert!(b > r, "bold {b} vs regular {r}");
+    }
+
+    #[test]
+    fn tabular_digits_have_equal_width() {
+        let mut t = TextRenderer::new().unwrap_or_else(|e| panic!("{e}"));
+        let ones = t.measure_tabular("1111", 13.0, Weight::Medium).width;
+        let eights = t.measure_tabular("8888", 13.0, Weight::Medium).width;
+        assert!((ones - eights).abs() < 0.01, "{ones} vs {eights}");
+        // Proportional digits differ, which is why tabular exists.
+        let p1 = t.measure_w("1111", 13.0, Weight::Medium).width;
+        let p8 = t.measure_w("8888", 13.0, Weight::Medium).width;
+        assert!((p1 - p8).abs() > 0.5);
+    }
+
+    #[test]
+    fn elide_never_exceeds_the_box() {
+        let mut t = TextRenderer::new().unwrap_or_else(|e| panic!("{e}"));
+        let long = "Привет 😀 ".repeat(10) + &"quarterly report ".repeat(15);
+        let mut max_w = 20.0;
+        while max_w < 300.0 {
+            let shown = t.elide_w(&long, 12.5, max_w, Weight::Medium);
+            let w = t.measure_w(&shown, 12.5, Weight::Medium).width;
+            assert!(w <= max_w + 0.5, "{w} > {max_w} for {shown:?}");
+            assert!(shown.ends_with('\u{2026}'), "{shown:?}");
+            max_w += 7.0;
+        }
+    }
 }
