@@ -36,6 +36,7 @@ pub enum Icon {
     Camera,
     Mic,
     Screenshot,
+    Reset,
 }
 
 impl Icon {
@@ -66,6 +67,7 @@ impl Icon {
         Icon::Camera,
         Icon::Mic,
         Icon::Screenshot,
+        Icon::Reset,
     ];
 
     /// The icon shown for a panel tab.
@@ -302,6 +304,13 @@ fn shape(g: &mut G, icon: Icon) {
             g.quad((6.0, 11.0), (6.0, 17.0), (12.0, 17.0));
             g.quad((12.0, 17.0), (18.0, 17.0), (18.0, 11.0));
             g.line(&[(12.0, 17.0), (12.0, 21.0)]);
+        }
+        Icon::Reset => {
+            g.quad((6.0, 12.0), (6.0, 5.5), (12.0, 5.5));
+            g.quad((12.0, 5.5), (18.0, 5.5), (18.0, 12.0));
+            g.quad((18.0, 12.0), (18.0, 18.5), (12.0, 18.5));
+            g.quad((12.0, 18.5), (8.0, 18.5), (6.5, 15.5));
+            g.solid(&[(3.0, 11.0), (9.0, 11.0), (6.0, 15.5)]);
         }
         Icon::Screenshot => {
             g.line(&[(4.0, 9.0), (4.0, 4.0), (9.0, 4.0)]);

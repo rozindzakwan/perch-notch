@@ -80,6 +80,20 @@ pub(crate) fn leading(ctx: &mut Ctx<'_>, lead: &Leading, x: f32, y: f32, d: f32)
             ctx.icon(*icon, x + (d - s) / 2.0, y + (d - s) / 2.0, s, ctx.pal.fg);
             d
         }
+        Leading::Check(done) => {
+            let r = d * 0.34;
+            let (cx, cy) = (x + d / 2.0, y + d / 2.0);
+            if *done {
+                let g = ctx.pal.tasks;
+                ctx.fill_gradient(circle(cx, cy, r), g, cx - r, cy - r, cx + r, cy + r);
+                let s = r * 1.3;
+                ctx.icon(Icon::Check, cx - s / 2.0, cy - s / 2.0, s, Color::WHITE);
+            } else {
+                let c = ctx.fade(ctx.pal.fg, 0.45);
+                ctx.stroke(circle(cx, cy, r), c, 1.5 * ctx.s);
+            }
+            d
+        }
         Leading::Thumb(px, side) => {
             image(ctx, px, *side, (x, y, d, d), d * 0.28);
             d

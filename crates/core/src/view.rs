@@ -223,12 +223,18 @@ pub struct TasksView {
 }
 
 /// Pomodoro header.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PomodoroView {
     /// "Focus 24:13" style label.
     pub label: String,
     /// Whether it is running (button shows pause) or not (shows play).
     pub running: bool,
+    /// How much of the current phase has passed, 0..=1 (the ring).
+    pub fraction: f32,
+    /// Time left in the phase, e.g. "16:12".
+    pub remaining: String,
+    /// Where we are, e.g. "Session 2 of 4 · break next".
+    pub session: String,
 }
 
 /// One slider row (mixer, sounds).

@@ -45,6 +45,9 @@ fn bodies() -> Vec<Body> {
             pomodoro: Some(PomodoroView {
                 label: "Focus 24:59".into(),
                 running: true,
+                fraction: 0.1,
+                remaining: "24:59".into(),
+                session: "Session 1 of 4".into(),
             }),
             todos: Some(vec![Row {
                 text: "Write tests".into(),
@@ -290,4 +293,161 @@ fn content_alpha_zero_draws_no_body_text() {
     assert!(ha.is_empty(), "hidden content is not clickable");
     let (pa1, _) = draw(&a, 1.0);
     assert_ne!(pa1.data(), pb.data());
+}
+
+fn panel_render(body: Body, tab: Tab, pal: Palette) -> (Pixmap, Vec<perch_core::view::Hit>) {
+    let view = PanelView {
+        collapsed: CollapsedView::Idle,
+        tabs: vec![Tab::Media, Tab::Tasks],
+        tab: Some(tab),
+        body,
+        pinned: false,
+    };
+    let mut r = Renderer::new().unwrap_or_else(|e| panic!("{e}"));
+    let mut pm = Pixmap::new(380, 300).unwrap_or_else(|| panic!("pixmap"));
+    let mut frame = Frame::new(380, 300, 1.0, pal);
+    frame.progress = 1.0;
+    let hits = r.draw(&mut pm, &frame, &view);
+    (pm, hits)
+}
+
+fn media(accent: Option<([u8; 3], [u8; 3])>, player: bool) -> Body {
+    Body::Media(MediaView {
+        title: if player {
+            "Die For You".into()
+        } else {
+            "Nothing playing".into()
+        },
+        artist: if player {
+            "The Weeknd".into()
+        } else {
+            String::new()
+        },
+        has_player: player,
+        playing: player,
+        fraction: player.then_some(0.5),
+        times: player.then(|| ("2:10".into(), "4:20".into())),
+        lyric: None,
+        cover: None,
+        accent,
+        next_lyric: None,
+    })
+}
+
+fn seek_fill_rgb(hits: &[perch_core::view::Hit], pm: &Pixmap) -> (u8, u8, u8) {
+    let seek = hits
+        .iter()
+        .find(|h| h.kind == perch_core::view::HitKind::Slider(SliderTarget::Seek))
+        .unwrap_or_else(|| panic!("seek bar"));
+    let p = pm
+        .pixel((seek.x + 3.0) as u32, (seek.y + seek.h / 2.0) as u32)
+        .unwrap_or_else(|| panic!("pixel"));
+    let a = f32::from(p.alpha().max(1)) / 255.0;
+    let un = |c: u8| (f32::from(c) / a).round().min(255.0) as u8;
+    (un(p.red()), un(p.green()), un(p.blue()))
+}
+
+#[test]
+fn music_uses_the_album_accent_or_the_coral_fallback() {
+    let (pm, hits) = panel_render(
+        media(Some(([20, 200, 90], [10, 90, 200])), true),
+        Tab::Media,
+        Palette::dark(false),
+    );
+    let (r, g, _) = seek_fill_rgb(&hits, &pm);
+    assert!(g > r + 60, "album green expected, got r={r} g={g}");
+    let (pm, hits) = panel_render(media(None, true), Tab::Media, Palette::dark(false));
+    let (r, g, b) = seek_fill_rgb(&hits, &pm);
+    assert!(
+        r > 200 && g < 160 && b > 100,
+        "coral fallback expected, got {r},{g},{b}"
+    );
+}
+
+#[test]
+fn music_without_player_shows_the_empty_state() {
+    for pal in [Palette::dark(false), Palette::light(false)] {
+        let (pm, hits) = panel_render(media(None, false), Tab::Media, pal);
+        assert!(
+            !hits.iter().any(|h| matches!(
+                h.kind,
+                perch_core::view::HitKind::Button(Action::Transport(_))
+            )),
+            "no transport controls without a player"
+        );
+        let body_painted = (60..240).any(|y| {
+            (20..360).any(|x| {
+                pm.pixel(x, y)
+                    .map(|p| p.alpha() == 255 && (p.red() > 150 || p.red() < 80))
+                    .unwrap_or(false)
+            })
+        });
+        assert!(body_painted, "the empty state says something");
+    }
+}
+
+#[test]
+fn tasks_ring_reflects_the_focus_fraction() {
+    let body = Body::Tasks(TasksView {
+        pomodoro: Some(PomodoroView {
+            label: "Focus 12:30".into(),
+            running: true,
+            fraction: 0.5,
+            remaining: "12:30".into(),
+            session: "Session 1 of 4".into(),
+        }),
+        todos: Some(Vec::new()),
+        reminder: None,
+    });
+    let (pm, hits) = panel_render(body, Tab::Tasks, Palette::dark(false));
+    let ring = hits
+        .iter()
+        .find(|h| h.kind == perch_core::view::HitKind::Button(Action::PomodoroToggle))
+        .unwrap_or_else(|| panic!("ring toggles the timer"));
+    let (cx, cy, r) = (
+        ring.x + ring.w / 2.0,
+        ring.y + ring.h / 2.0,
+        ring.w / 2.0 - 5.0,
+    );
+    let at = |deg: f32| {
+        let a = (deg - 90.0).to_radians();
+        let p = pm
+            .pixel((cx + r * a.cos()) as u32, (cy + r * a.sin()) as u32)
+            .unwrap_or_else(|| panic!("px"));
+        p.red()
+    };
+    assert!(
+        at(60.0) > at(240.0) + 40,
+        "first half filled (red {}), second half track (red {})",
+        at(60.0),
+        at(240.0)
+    );
+}
+
+#[test]
+fn todo_rows_have_round_checks_and_an_add_row() {
+    let todo = |id: u64, text: &str| Row {
+        text: text.into(),
+        detail: String::new(),
+        check: Some(false),
+        primary: Some(Action::TodoToggle(perch_core::todo::TodoId(id))),
+        remove: Some(Action::TodoRemove(perch_core::todo::TodoId(id))),
+        dim: false,
+    };
+    let body = Body::Tasks(TasksView {
+        pomodoro: None,
+        todos: Some(vec![
+            todo(1, "Send the report"),
+            todo(2, "Call the dentist"),
+        ]),
+        reminder: None,
+    });
+    let (_, hits) = panel_render(body, Tab::Tasks, Palette::dark(false));
+    let has = |a: Action| {
+        hits.iter()
+            .any(|h| h.kind == perch_core::view::HitKind::Button(a.clone()))
+    };
+    assert!(has(Action::TodoToggle(perch_core::todo::TodoId(1))));
+    assert!(has(Action::TodoToggle(perch_core::todo::TodoId(2))));
+    assert!(has(Action::TodoAdd), "an add-a-task row");
 }

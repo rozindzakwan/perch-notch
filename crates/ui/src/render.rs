@@ -451,6 +451,18 @@ fn draw_pill(ctx: &mut Ctx<'_>, collapsed: &CollapsedView, (x, y, w, h): (f32, f
 fn draw_panel(ctx: &mut Ctx<'_>, view: &PanelView, panel: (f32, f32, f32, f32), frame: &Frame) {
     let s = ctx.s;
     let (lw, lh) = frame.layout.unwrap_or((panel.2, panel.3));
+    // Music glows in the cover's colours.
+    if let Body::Media(m) = &view.body {
+        if m.has_player {
+            let g = media_accent(ctx, m);
+            let (a, b) = (ctx.fade(g.from, 1.0), ctx.fade(g.to, 1.0));
+            let r = frame
+                .corner_radius
+                .map(|r| r * s)
+                .unwrap_or(radius::PANEL * s);
+            ctx.fx.glow(ctx.pm, panel, r, (a, b));
+        }
+    }
     // Centre the layout horizontally, anchor it to the top.
     let x = panel.0 + (panel.2 - lw) / 2.0;
     let y = panel.1;
@@ -506,13 +518,18 @@ fn draw_panel(ctx: &mut Ctx<'_>, view: &PanelView, panel: (f32, f32, f32, f32), 
         glass::tabs(ctx, (x + pad, y + pad, tw, bar), &items, active, hx);
     }
 
-    // Body, through the older painter for screens not yet restyled.
     let body = (
         x + pad,
         y + HEADER * s,
         lw - 2.0 * pad,
         (lh - HEADER * s - pad).max(0.0),
     );
+    match &view.body {
+        Body::Media(m) => return music(ctx, m, body),
+        Body::Tasks(t) => return tasks(ctx, t, body),
+        _ => {}
+    }
+    // Screens not yet restyled go through the older painter.
     let mut pal = ctx.pal;
     let a = ctx.alpha;
     for c in [&mut pal.fg, &mut pal.muted, &mut pal.surface, &mut pal.bg] {
@@ -1034,6 +1051,285 @@ fn copy_rgba(pm: &mut Pixmap, rgba: &[u8], side: u32) {
             if let Some(slot) = pixels.get_mut(i) {
                 *slot = px;
             }
+        }
+    }
+}
+
+/// Album colours as a gradient, or the coral fallback.
+fn media_accent(ctx: &Ctx<'_>, m: &MediaView) -> crate::theme::Gradient {
+    match m.accent {
+        Some((a, b)) => crate::theme::Gradient {
+            from: Color::from_rgba8(a[0], a[1], a[2], 255),
+            to: Color::from_rgba8(b[0], b[1], b[2], 255),
+        },
+        None => ctx.pal.accent,
+    }
+}
+
+/// Music: cover, title/artist, lyrics, gradient seek bar, transport.
+fn music(ctx: &mut Ctx<'_>, m: &MediaView, (x, y, w, _h): (f32, f32, f32, f32)) {
+    let s = ctx.s;
+    let muted = ctx.fade(ctx.pal.fg, crate::tokens::SECONDARY_ALPHA);
+    if !m.has_player {
+        let isz = 34.0 * s;
+        let cy = y + 30.0 * s;
+        let c = ctx.fade(ctx.pal.fg, 0.35);
+        ctx.icon(Icon::Music, x + (w - isz) / 2.0, cy, isz, c);
+        let tw = ctx.measure(&m.title, text::TITLE);
+        let fg = ctx.pal.fg;
+        ctx.text(
+            &m.title,
+            x + (w - tw) / 2.0,
+            cy + isz + 10.0 * s,
+            22.0 * s,
+            text::TITLE,
+            fg,
+            w,
+        );
+        let hint = "Play something in Spotify, a browser or any media app";
+        let hw = ctx.measure(hint, text::SECONDARY).min(w);
+        ctx.text(
+            hint,
+            x + (w - hw) / 2.0,
+            cy + isz + 34.0 * s,
+            18.0 * s,
+            text::SECONDARY,
+            muted,
+            w,
+        );
+        return;
+    }
+    let g = media_accent(ctx, m);
+    let side = 72.0 * s;
+    let (cx, cy) = (x, y + 2.0 * s);
+    match &m.cover {
+        Some((px, n)) => glass::image(ctx, px, *n, (cx, cy, side, side), radius::COVER * s),
+        None => {
+            let p = art::rounded_rect(cx, cy, side, side, radius::COVER * s);
+            ctx.fill_gradient(p, g, cx, cy, cx + side, cy + side);
+            let isz = side * 0.42;
+            ctx.icon(
+                Icon::Music,
+                cx + (side - isz) / 2.0,
+                cy + (side - isz) / 2.0,
+                isz,
+                Color::WHITE,
+            );
+        }
+    }
+    let tx = cx + side + 12.0 * s;
+    let tw = (x + w - tx).max(0.0);
+    let fg = ctx.pal.fg;
+    ctx.text(&m.title, tx, cy + 2.0 * s, 20.0 * s, text::TITLE, fg, tw);
+    if !m.artist.is_empty() {
+        ctx.text(
+            &m.artist,
+            tx,
+            cy + 22.0 * s,
+            16.0 * s,
+            text::SECONDARY,
+            muted,
+            tw,
+        );
+    }
+    if let Some(l) = &m.lyric {
+        ctx.text(
+            l,
+            tx,
+            cy + 42.0 * s,
+            16.0 * s,
+            (text::BODY.0, Weight::Bold),
+            fg,
+            tw,
+        );
+        if let Some(n) = &m.next_lyric {
+            ctx.text(n, tx, cy + 58.0 * s, 14.0 * s, text::CAPTION, muted, tw);
+        }
+    }
+    // Seek bar with times.
+    let by = cy + side + 14.0 * s;
+    let bh = 5.0 * s;
+    let frac = m.fraction.unwrap_or(0.0) as f32;
+    glass::progress(ctx, (x, by, w, bh), frac, g);
+    if m.fraction.is_some() {
+        ctx.hit(
+            (x, by - 6.0 * s, w, bh + 12.0 * s),
+            HitKind::Slider(perch_core::view::SliderTarget::Seek),
+        );
+    }
+    if let Some((a, b)) = &m.times {
+        let px = text::CAPTION.0 * s;
+        let base = by + bh + 14.0 * s;
+        let c = ctx.fade(muted, 1.0);
+        ctx.text
+            .draw_tabular(ctx.pm, a, x, base, px, c, w / 2.0, Weight::Medium);
+        let bw = ctx.text.measure_tabular(b, px, Weight::Medium).width;
+        ctx.text
+            .draw_tabular(ctx.pm, b, x + w - bw, base, px, c, bw + 2.0, Weight::Medium);
+    }
+    // Transport.
+    let ty = by + bh + 40.0 * s;
+    let mid = x + w / 2.0;
+    let small = 34.0 * s;
+    let big = 44.0 * s;
+    let gap = 14.0 * s;
+    let play_icon = if m.playing { Icon::Pause } else { Icon::Play };
+    glass::round_button(
+        ctx,
+        mid - big / 2.0 - gap - small / 2.0,
+        ty,
+        small,
+        Icon::Prev,
+        false,
+        Action::Transport(TransportCommand::Previous),
+    );
+    glass::round_button(
+        ctx,
+        mid,
+        ty,
+        big,
+        play_icon,
+        true,
+        Action::Transport(TransportCommand::PlayPause),
+    );
+    glass::round_button(
+        ctx,
+        mid + big / 2.0 + gap + small / 2.0,
+        ty,
+        small,
+        Icon::Next,
+        false,
+        Action::Transport(TransportCommand::Next),
+    );
+}
+
+/// Tasks: Pomodoro ring + controls, reminder line, round-check to-dos.
+fn tasks(ctx: &mut Ctx<'_>, t: &TasksView, (x, y, w, h): (f32, f32, f32, f32)) {
+    let s = ctx.s;
+    let muted = ctx.fade(ctx.pal.fg, crate::tokens::SECONDARY_ALPHA);
+    let mut top = y;
+    if let Some(p) = &t.pomodoro {
+        let r = 30.0 * s;
+        let (rcx, rcy) = (x + r + 2.0 * s, top + r + 2.0 * s);
+        glass::ring(ctx, rcx, rcy, r, p.fraction, &p.remaining);
+        ctx.button(
+            (
+                rcx - r - 4.0 * s,
+                rcy - r - 4.0 * s,
+                2.0 * r + 8.0 * s,
+                2.0 * r + 8.0 * s,
+            ),
+            Action::PomodoroToggle,
+        );
+        let tx = rcx + r + 14.0 * s;
+        let tw = (x + w - tx).max(0.0);
+        let title = p
+            .label
+            .split_whitespace()
+            .next()
+            .unwrap_or("Focus")
+            .to_string();
+        let fg = ctx.pal.fg;
+        ctx.text(&title, tx, top + 6.0 * s, 20.0 * s, text::TITLE, fg, tw);
+        ctx.text(
+            &p.session,
+            tx,
+            top + 26.0 * s,
+            16.0 * s,
+            text::SECONDARY,
+            muted,
+            tw,
+        );
+        let d = 28.0 * s;
+        let byy = top + 44.0 * s + d / 2.0;
+        let icon = if p.running { Icon::Pause } else { Icon::Play };
+        glass::round_button(
+            ctx,
+            tx + d / 2.0,
+            byy,
+            d,
+            icon,
+            false,
+            Action::PomodoroToggle,
+        );
+        glass::round_button(
+            ctx,
+            tx + d * 1.5 + 8.0 * s,
+            byy,
+            d,
+            Icon::Next,
+            false,
+            Action::PomodoroSkip,
+        );
+        glass::round_button(
+            ctx,
+            tx + d * 2.5 + 16.0 * s,
+            byy,
+            d,
+            Icon::Reset,
+            false,
+            Action::PomodoroReset,
+        );
+        if let Some(rem) = &t.reminder {
+            let rw = ctx.measure(rem, text::CAPTION).min(w * 0.4);
+            ctx.text(
+                rem,
+                x + w - rw,
+                top + 6.0 * s,
+                16.0 * s,
+                text::CAPTION,
+                muted,
+                rw,
+            );
+        }
+        top += 2.0 * r + 14.0 * s;
+    } else if let Some(rem) = &t.reminder {
+        ctx.text(rem, x, top, 18.0 * s, text::CAPTION, muted, w);
+        top += 22.0 * s;
+    }
+    if let Some(rows) = &t.todos {
+        let rh = crate::tokens::space::ROW1 * s;
+        for row in rows {
+            if top + rh > y + h {
+                break;
+            }
+            let done = row.check.unwrap_or(false);
+            let chip = row.remove.clone().map(|a| ("Delete", a));
+            glass::row(
+                ctx,
+                (x - 6.0 * s, top, w + 12.0 * s, rh),
+                &glass::Leading::Check(done),
+                &row.text,
+                None,
+                (!row.detail.is_empty()).then_some(row.detail.as_str()),
+                chip,
+                row.primary.clone(),
+                row.dim,
+            );
+            top += rh;
+        }
+        if top + rh <= y + h + 1.0 {
+            let rect = (x - 6.0 * s, top, w + 12.0 * s, rh);
+            if ctx.hovered(rect) {
+                ctx.rrect(rect, radius::ROW * s, ctx.pal.raised[0]);
+            }
+            let isz = 14.0 * s;
+            ctx.icon(Icon::Plus, x + 7.0 * s, top + (rh - isz) / 2.0, isz, muted);
+            let label = if rows.is_empty() {
+                "Nothing to do. Add a task"
+            } else {
+                "Add a task"
+            };
+            ctx.text(
+                label,
+                x + 38.0 * s,
+                top,
+                rh,
+                text::BODY,
+                muted,
+                w - 40.0 * s,
+            );
+            ctx.button(rect, Action::TodoAdd);
         }
     }
 }

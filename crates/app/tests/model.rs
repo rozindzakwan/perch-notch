@@ -716,6 +716,6 @@ fn panel_height_follows_the_tab_within_the_maximum() {
     }
     m.action(Action::SelectTab(Tab::Clipboard), now);
     let clips = m.panel_height_hint();
-    assert!(media >= 200 && media <= 300, "media {media}");
+    assert!((200..=300).contains(&media), "media {media}");
     assert_eq!(clips, 300, "a long list is capped at expanded_height");
 }

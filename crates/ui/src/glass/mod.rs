@@ -39,6 +39,8 @@ pub enum Leading {
     Icon(Icon, Option<Gradient>),
     /// A small image (straight RGBA8, square side).
     Thumb(Arc<Vec<u8>>, u32),
+    /// A round check (to-dos): filled green with a tick when done.
+    Check(bool),
     /// Nothing.
     None,
 }

@@ -65,6 +65,9 @@ fn panels() -> Vec<(&'static str, Tab, Body)> {
                 pomodoro: Some(PomodoroView {
                     label: "Focus 16:12".into(),
                     running: true,
+                    fraction: 0.35,
+                    remaining: "16:12".into(),
+                    session: "Session 2 of 4 - break next".into(),
                 }),
                 todos: Some(vec![
                     row("Send the quarterly report", "14:30"),
@@ -169,12 +172,23 @@ fn main() {
         Color::from_rgba8(46, 56, 84, 255)
     };
     let save = |name: &str, w: u32, h: u32, frame: &Frame, view: &PanelView, r: &mut Renderer| {
-        let Some(mut pm) = Pixmap::new(w, h) else { return };
+        let Some(mut pm) = Pixmap::new(w, h) else {
+            return;
+        };
         r.draw(&mut pm, frame, view);
         // Composite over a wallpaper-ish colour so translucency is visible.
-        let Some(mut bg) = Pixmap::new(w, h) else { return };
+        let Some(mut bg) = Pixmap::new(w, h) else {
+            return;
+        };
         bg.fill(wall);
-        bg.draw_pixmap(0, 0, pm.as_ref(), &tiny_skia::PixmapPaint::default(), tiny_skia::Transform::identity(), None);
+        bg.draw_pixmap(
+            0,
+            0,
+            pm.as_ref(),
+            &tiny_skia::PixmapPaint::default(),
+            tiny_skia::Transform::identity(),
+            None,
+        );
         let path = out.join(format!("{name}.png"));
         if let Err(e) = bg.save_png(&path) {
             eprintln!("{}: {e}", path.display());
@@ -182,7 +196,14 @@ fn main() {
             println!("{}", path.display());
         }
     };
-    let tabs = vec![Tab::Media, Tab::Tasks, Tab::Mail, Tab::Clipboard, Tab::Mixer, Tab::Time];
+    let tabs = vec![
+        Tab::Media,
+        Tab::Tasks,
+        Tab::Mail,
+        Tab::Clipboard,
+        Tab::Mixer,
+        Tab::Time,
+    ];
     // Pill.
     let pill = PanelView {
         collapsed: CollapsedView::Pill {

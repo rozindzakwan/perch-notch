@@ -1264,6 +1264,34 @@ impl Model {
         }
     }
 
+    /// How much of the current Pomodoro phase has passed.
+    fn pomodoro_fraction(&self) -> f32 {
+        if self.pomodoro.state() == TimerState::Idle {
+            return 0.0;
+        }
+        let c = &self.config.pomodoro;
+        let minutes = match self.pomodoro.phase() {
+            Phase::Work => c.work_minutes,
+            Phase::ShortBreak => c.break_minutes,
+            Phase::LongBreak => c.long_break_minutes,
+        };
+        let total = (u64::from(minutes) * 60).max(1) as f32;
+        (1.0 - self.pomodoro.remaining().as_secs_f32() / total).clamp(0.0, 1.0)
+    }
+
+    /// "Session 2 of 4 - break next" / "Break - focus next".
+    fn pomodoro_session(&self) -> String {
+        let per = self.config.pomodoro.sessions_before_long_break.max(1);
+        match self.pomodoro.phase() {
+            Phase::Work => format!(
+                "Session {} of {per} \u{b7} break next",
+                self.pomodoro.completed_work_sessions() % per + 1
+            ),
+            Phase::ShortBreak => "Short break \u{b7} focus next".into(),
+            Phase::LongBreak => "Long break \u{b7} focus next".into(),
+        }
+    }
+
     fn tasks_view(&self, now: Now) -> TasksView {
         let pomodoro = self.is_active(Feature::Pomodoro).then(|| PomodoroView {
             label: match self.pomodoro.state() {
@@ -1276,6 +1304,14 @@ impl Model {
                 _ => self.pomodoro.label(),
             },
             running: self.pomodoro.state() == TimerState::Running,
+            fraction: self.pomodoro_fraction(),
+            remaining: clock(match self.pomodoro.state() {
+                TimerState::Idle => {
+                    Duration::from_secs(u64::from(self.config.pomodoro.work_minutes) * 60)
+                }
+                _ => self.pomodoro.remaining(),
+            }),
+            session: self.pomodoro_session(),
         });
         let todos = self.is_active(Feature::Todo).then(|| {
             let mut items = self.todos.all();
