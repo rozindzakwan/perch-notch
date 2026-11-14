@@ -21,7 +21,12 @@ const FONT_FALLBACK: usize = 3;
 
 /// The embedded fonts plus a glyph cache.
 pub struct TextRenderer {
+    /// Inter Regular, Medium, Bold.
     fonts: Vec<Font>,
+    /// DejaVu Sans, parsed on the first character Inter lacks: fontdue builds
+    /// every outline up front, so an unused fallback would cost memory for
+    /// nothing.
+    fallback: std::cell::OnceCell<Option<Font>>,
     cache: HashMap<(usize, char, u32), Glyph>,
     /// Widest digit advance per (font, size), for tabular numbers.
     digit_w: HashMap<(usize, u32), f32>,
@@ -71,14 +76,38 @@ impl TextRenderer {
             )?,
             load(include_bytes!("../assets/Inter-Medium.ttf"), "Inter Medium")?,
             load(include_bytes!("../assets/Inter-Bold.ttf"), "Inter Bold")?,
-            // DejaVu Sans: Latin, Cyrillic, Greek, many symbols and emoticons.
-            load(include_bytes!("../assets/PerchUI.ttf"), "DejaVu Sans")?,
         ];
         Ok(Self {
             fonts,
+            fallback: std::cell::OnceCell::new(),
             cache: HashMap::new(),
             digit_w: HashMap::new(),
         })
+    }
+
+    /// Font by index; the fallback is loaded on first use.
+    fn font(&self, i: usize) -> Option<&Font> {
+        if i == FONT_FALLBACK {
+            // DejaVu Sans, subset to what Inter lacks (scripts/subset-fonts.sh).
+            self.fallback
+                .get_or_init(|| {
+                    match load(include_bytes!("../assets/PerchUI.ttf"), "DejaVu Sans") {
+                        Ok(f) => Some(f),
+                        Err(e) => {
+                            log::warn!("{e}");
+                            None
+                        }
+                    }
+                })
+                .as_ref()
+        } else {
+            self.fonts.get(i)
+        }
+    }
+
+    /// Whether the fallback font has been loaded (tests, diagnostics).
+    pub fn fallback_loaded(&self) -> bool {
+        self.fallback.get().is_some()
     }
 
     /// Which font draws `ch` at `weight`: the Inter weight if it has the
@@ -90,8 +119,7 @@ impl TextRenderer {
             Weight::Bold => FONT_BOLD,
         };
         let has = |i: usize| {
-            self.fonts
-                .get(i)
+            self.font(i)
                 .map(|f| f.lookup_glyph_index(ch) != 0)
                 .unwrap_or(false)
         };
@@ -108,7 +136,7 @@ impl TextRenderer {
         let font = self.font_for(ch, weight);
         let key = (font, ch, px.to_bits());
         if !self.cache.contains_key(&key) {
-            let (metrics, coverage) = match self.fonts.get(font) {
+            let (metrics, coverage) = match self.font(font) {
                 Some(f) => f.rasterize(ch, px),
                 None => return unreachable_glyph(),
             };
@@ -134,11 +162,7 @@ impl TextRenderer {
 
     fn line(&self, px: f32, weight: Weight) -> (f32, f32) {
         let idx = self.font_for('A', weight);
-        match self
-            .fonts
-            .get(idx)
-            .and_then(|f| f.horizontal_line_metrics(px))
-        {
+        match self.font(idx).and_then(|f| f.horizontal_line_metrics(px)) {
             Some(m) => (m.ascent, -m.descent),
             None => (px * 0.8, px * 0.2),
         }
@@ -392,6 +416,15 @@ fn unreachable_glyph() -> &'static Glyph {
 mod tests {
     use super::*;
     use crate::tokens::Weight;
+
+    #[test]
+    fn fallback_is_parsed_only_when_a_character_needs_it() {
+        let mut t = TextRenderer::new().unwrap_or_else(|e| panic!("{e}"));
+        let _ = t.measure("Perch \u{2022} \u{2014} J\u{fc}rgen 12:30", 14.0);
+        assert!(!t.fallback_loaded(), "Inter covers Latin text");
+        let _ = t.measure("Halo \u{1F600}", 14.0);
+        assert!(t.fallback_loaded(), "the emoji needs DejaVu");
+    }
 
     #[test]
     fn latin_uses_inter_and_emoji_falls_back() {

@@ -4,6 +4,12 @@ Release archive Inter-4.1.zip sha256 9883fdd4a49d4fb66bd8177ba6625ef9a64aa458997
 97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872 *Inter-Medium.ttf
 288316099b1e0a47a4716d159098005eef7c0066921f34e3200393dbdb01947f *Inter-Bold.ttf
 
+The bundled files are subsets of these (Latin incl. Vietnamese, Greek, Cyrillic,
+punctuation and symbols; no OpenType layout features or hinting), made with
+scripts/subset-fonts.sh using fontTools, so fontdue does not keep thousands of
+unreachable alternates in memory. SIL OFL 1.1 permits modified versions; Inter
+has no Reserved Font Name.
+
 Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
