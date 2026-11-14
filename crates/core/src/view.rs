@@ -116,15 +116,55 @@ pub enum Action {
     PinToggle,
 }
 
+/// A small icon the pill can show when there is no cover art. The renderer
+/// maps it to its own icon set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Glyph {
+    /// Something is playing (no cover).
+    Music,
+    /// A timer is running.
+    Timer,
+    /// Mail.
+    Mail,
+    /// A clock.
+    Clock,
+    /// Attention needed.
+    Warning,
+}
+
+/// What a badge counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BadgeKind {
+    /// Unread mail.
+    Mail,
+}
+
+/// A count shown at the right end of the pill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Badge {
+    /// What it counts.
+    pub kind: BadgeKind,
+    /// How many.
+    pub count: u32,
+}
+
 /// The collapsed pill's content.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CollapsedView {
     /// Just the mascot.
     Idle,
-    /// A countdown or status (accent colored).
-    Status(String),
-    /// The current track.
-    NowPlaying(String),
+    /// Cover thumbnail or glyph, one line of text (track or countdown), and
+    /// badges (mail count).
+    Pill {
+        /// Cover art (straight RGBA8, side).
+        thumb: Option<(std::sync::Arc<Vec<u8>>, u32)>,
+        /// Icon when there is no cover.
+        glyph: Option<Glyph>,
+        /// Track, countdown or status; may be empty when only badges show.
+        text: String,
+        /// Counts on the right.
+        badges: Vec<Badge>,
+    },
     /// A transient message (reminder, notification fallback).
     Message(String),
 }

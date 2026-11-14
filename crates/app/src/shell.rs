@@ -119,6 +119,12 @@ pub struct Shell {
     queued: Vec<Effect>,
     /// Persisted screen time has been merged into the model.
     usage_loaded: bool,
+    /// Shadow margin around the surface in the pill window (physical px).
+    inset: (f32, f32, f32, f32),
+    /// Expanded panel size the content is laid out at (physical px).
+    layout_px: (f32, f32),
+    /// The cursor is over the pill window (for hover states).
+    cursor_inside: bool,
 }
 
 impl Shell {
@@ -181,6 +187,9 @@ impl Shell {
             quitting: false,
             queued: Vec::new(),
             usage_loaded: false,
+            inset: (0.0, 0.0, 0.0, 0.0),
+            layout_px: (0.0, 0.0),
+            cursor_inside: false,
         }
     }
 
@@ -190,6 +199,20 @@ impl Shell {
 
     fn geo(&self) -> NotchGeometry {
         self.config().notch.geometry()
+    }
+
+    /// Geometry for this frame: the pill as wide as its content (within the
+    /// configured width and 320 px) and the panel as tall as the active tab.
+    fn live_geo(&mut self, scale: f32) -> NotchGeometry {
+        let mut geo = self.geo();
+        let min = geo.collapsed.0;
+        let max = min.max(320);
+        if let Some(r) = &mut self.renderer {
+            let want = r.pill_width(&self.model.collapsed(), scale);
+            geo.collapsed.0 = want.clamp(min, max);
+        }
+        geo.expanded.1 = self.model.panel_height_hint();
+        geo
     }
 
     fn palette(&self) -> Palette {
@@ -221,13 +244,34 @@ impl Shell {
         let Some(monitor) = self.resolve_monitor() else {
             return;
         };
-        let geo = self.geo();
+        let geo = self.live_geo(monitor.scale as f32);
         let pos = self.config().notch.position;
         let v = self.notch.visual(geo.collapsed, geo.expanded);
-        let pill = geometry::notch_rect_sized(&monitor, pos, &geo, (v.width, v.height));
+        let mut pill = geometry::notch_rect_sized(&monitor, pos, &geo, (v.width, v.height));
         let visible = v.visible && self.notch.is_visible();
         let hot = geometry::hot_zone_rect(&monitor, pos, &geo).rect;
         let Some(w) = &self.windows else { return };
+        // While open, the window grows by a shadow margin on every side but
+        // the screen edge it hangs from. Never while collapsed, so the pill
+        // cannot steal clicks around itself.
+        let scale = monitor.scale as f32;
+        let m = if v.progress > 0.0 && !w.needs_opaque() {
+            (12.0 * scale).round() as i32
+        } else {
+            0
+        };
+        let (l, t, r, b) = match pos.edge() {
+            geometry::Edge::Top => (m, 0, m, m),
+            geometry::Edge::Bottom => (m, m, m, 0),
+            geometry::Edge::Left => (0, m, m, m),
+            geometry::Edge::Right => (m, m, 0, m),
+        };
+        pill.x -= l;
+        pill.y -= t;
+        pill.w += (l + r) as u32;
+        pill.h += (t + b) as u32;
+        self.inset = (l as f32, t as f32, r as f32, b as f32);
+        self.layout_px = (geo.expanded.0 as f32 * scale, geo.expanded.1 as f32 * scale);
         if self.last_pill != Some((pill, visible)) {
             if let Err(e) = w.place_pill(pill, visible) {
                 log::warn!("placing the pill: {e}");
@@ -265,7 +309,10 @@ impl Shell {
         let scale = self.monitor.map(|m| m.scale as f32).unwrap_or(1.0);
         let progress = self.notch.progress();
         let corner_radius = self.config().notch.corner_radius.map(|r| r as f32);
-        let mut view = self.model.view(now);
+        let view = self.model.view(now);
+        let content_alpha = self.notch.visual((1, 1), (1, 1)).content_alpha;
+        let (inset, layout_px) = (self.inset, self.layout_px);
+        let cursor = self.cursor_inside.then_some(self.cursor);
         let Some(windows) = &mut self.windows else {
             return;
         };
@@ -283,26 +330,25 @@ impl Shell {
         frame.progress = progress;
         frame.corner_radius = corner_radius;
         frame.opaque = windows.needs_opaque();
+        frame.content_alpha = content_alpha;
+        frame.inset = inset;
+        frame.layout = Some(layout_px);
+        frame.shadow = if inset == (0.0, 0.0, 0.0, 0.0) {
+            0.0
+        } else {
+            12.0
+        };
+        frame.cursor = cursor;
         if frame.opaque {
             let s = scale;
             let r = corner_radius.map(|r| r * s).unwrap_or(if progress >= 0.5 {
-                18.0 * s
+                perch_ui::tokens::radius::PANEL * s
             } else {
                 h as f32 / 2.0
             });
             windows.clip_to_pill(w, h, r.round() as u32);
         }
-        // Mid-animation the pill is between sizes; show just the shape so
-        // neither layout is drawn squashed.
-        if (0.35..0.85).contains(&progress) {
-            view.collapsed = perch_core::view::CollapsedView::Idle;
-            view.tabs.clear();
-            view.body = perch_core::view::Body::Empty(String::new());
-        }
         self.hits = renderer.draw(pm, &frame, &view);
-        if (0.35..0.85).contains(&progress) {
-            self.hits.clear();
-        }
         match windows.present(pm) {
             Ok(()) => {
                 self.frames += 1;
@@ -1315,6 +1361,9 @@ impl ApplicationHandler<UserEvent> for Shell {
                 el.exit();
             }
             WindowEvent::CursorEntered { .. } => {
+                if id == pill_id {
+                    self.cursor_inside = true;
+                }
                 let ev = if id == hot_id {
                     NotchEvent::HotZoneEntered
                 } else {
@@ -1325,6 +1374,10 @@ impl ApplicationHandler<UserEvent> for Shell {
                 }
             }
             WindowEvent::CursorLeft { .. } => {
+                if id == pill_id {
+                    self.cursor_inside = false;
+                    self.request_redraw();
+                }
                 // Crossing from the strip into the pill fires HotZoneLeft then
                 // PointerEntered; the enter cancels the pending collapse, so
                 // the grace period makes the hand-over seamless.
@@ -1349,6 +1402,10 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
             WindowEvent::CursorMoved { position, .. } if id == pill_id => {
                 self.cursor = (position.x as f32, position.y as f32);
+                if self.expanded() {
+                    // Hover highlights follow the pointer.
+                    self.request_redraw();
+                }
                 if let Some((px, py)) = self.press {
                     let moved = (self.cursor.0 - px).abs() + (self.cursor.1 - py).abs();
                     if moved > 8.0 {

@@ -14,7 +14,9 @@ use perch_core::platform::{
     AudioSession, EventSource, MediaControl, MediaEvent, Notifier, PlatformEvent, Track,
     TransportCommand,
 };
-use perch_core::view::{resolve_click, Action, Body, CollapsedView, SliderTarget, Tab};
+use perch_core::view::{
+    resolve_click, Action, Badge, BadgeKind, Body, CollapsedView, Glyph, SliderTarget, Tab,
+};
 
 fn t0() -> Now {
     Now {
@@ -86,9 +88,10 @@ fn fake_media_backend_drives_the_collapsed_pill_and_the_media_tab() {
             .any(|e| matches!(e, Effect::FetchLyrics(r) if r.title == "Song")),
         "lyrics are fetched once per new track when the feature is on: {fx:?}"
     );
-    assert_eq!(
-        m.collapsed(),
-        CollapsedView::NowPlaying("Band - Song".into())
+    assert!(
+        matches!(m.collapsed(), CollapsedView::Pill { ref text, glyph: Some(Glyph::Music), .. } if text == "Band - Song"),
+        "{:?}",
+        m.collapsed()
     );
 
     let view = m.view(now.plus(Duration::from_secs(50)));
@@ -250,7 +253,7 @@ fn pomodoro_countdown_shows_in_the_pill_and_notifies_on_completion() {
     let mut m = Model::new(cfg, now);
     m.action(Action::PomodoroToggle, now);
     assert!(
-        matches!(m.collapsed(), CollapsedView::Status(s) if s.contains("1:00") || s.contains("0:59"))
+        matches!(m.collapsed(), CollapsedView::Pill { ref text, glyph: Some(Glyph::Timer), .. } if text.contains("1:00") || text.contains("0:59"))
     );
     let d = m.next_deadline(now, false).unwrap_or_default();
     assert!(
@@ -589,7 +592,11 @@ mod mail {
             notifications(&m.mail_update(snap(&[1, 2]))).is_empty(),
             "startup is quiet"
         );
-        assert_eq!(m.collapsed(), CollapsedView::Status("2 unread".into()));
+        assert!(
+            matches!(m.collapsed(), CollapsedView::Pill { ref badges, .. } if badges == &[Badge { kind: BadgeKind::Mail, count: 2 }]),
+            "{:?}",
+            m.collapsed()
+        );
         let fx = m.mail_update(snap(&[1, 2, 3]));
         assert_eq!(
             notifications(&fx),
@@ -692,4 +699,23 @@ fn cover_change_computes_accent_once_and_lyrics_expose_the_next_line() {
     assert!(v.accent.is_some(), "accent from the cover");
     assert_eq!(v.lyric.as_deref(), Some("line one"));
     assert_eq!(v.next_lyric.as_deref(), Some("line two"));
+}
+
+#[test]
+fn panel_height_follows_the_tab_within_the_maximum() {
+    let now = t0();
+    let mut m = Model::new(config_all(), now);
+    m.action(Action::SelectTab(Tab::Media), now);
+    let media = m.panel_height_hint();
+    for i in 0..30 {
+        m.clipboard_captured(
+            ClipboardContent::text(format!("clip {i}")),
+            &ContentFlags::default(),
+            now,
+        );
+    }
+    m.action(Action::SelectTab(Tab::Clipboard), now);
+    let clips = m.panel_height_hint();
+    assert!(media >= 200 && media <= 300, "media {media}");
+    assert_eq!(clips, 300, "a long list is capped at expanded_height");
 }

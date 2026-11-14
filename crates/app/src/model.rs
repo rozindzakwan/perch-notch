@@ -24,8 +24,8 @@ use perch_core::shelf::Shelf;
 use perch_core::todo::TodoList;
 use perch_core::usage::{DayId, UsageTracker, UtcOffset};
 use perch_core::view::{
-    clock, human_duration, Action, Body, CollapsedView, MediaView, PanelView, PomodoroView, Row,
-    SliderRow, SliderTarget, Tab, TasksView, UsageBar,
+    clock, human_duration, Action, Badge, BadgeKind, Body, CollapsedView, Glyph, MediaView,
+    PanelView, PomodoroView, Row, SliderRow, SliderTarget, Tab, TasksView, UsageBar,
 };
 
 use crate::features::{ActiveFeatures, Feature};
@@ -971,29 +971,73 @@ impl Model {
         }
     }
 
-    /// What the collapsed pill shows, by priority: message, Pomodoro, track.
+    /// What the collapsed pill shows: a message wins; otherwise the running
+    /// Pomodoro or the playing track, plus badges (unread mail).
     pub fn collapsed(&self) -> CollapsedView {
         if let Some((m, _)) = &self.message {
             return CollapsedView::Message(m.clone());
         }
-        if self.is_active(Feature::Pomodoro) && self.pomodoro.state() != TimerState::Idle {
-            return CollapsedView::Status(self.pomodoro.label());
-        }
-        if self.is_active(Feature::Media) {
-            if let Some(label) = self.media.label() {
-                if self.media.is_playing() {
-                    return CollapsedView::NowPlaying(label);
-                }
-            }
-        }
+        let mut badges = Vec::new();
         if self.is_active(Feature::Mail) {
-            match self.mail.total_unread() {
-                0 => {}
-                1 => return CollapsedView::Status("1 unread".into()),
-                n => return CollapsedView::Status(format!("{n} unread")),
+            let n = self.mail.total_unread();
+            if n > 0 {
+                badges.push(Badge {
+                    kind: BadgeKind::Mail,
+                    count: n,
+                });
             }
         }
-        CollapsedView::Idle
+        let (thumb, glyph, text) =
+            if self.is_active(Feature::Pomodoro) && self.pomodoro.state() != TimerState::Idle {
+                (None, Some(Glyph::Timer), self.pomodoro.label())
+            } else {
+                match self.media.label() {
+                    Some(label) if self.is_active(Feature::Media) && self.media.is_playing() => {
+                        let thumb = self.cover.clone();
+                        let glyph = thumb.is_none().then_some(Glyph::Music);
+                        (thumb, glyph, label)
+                    }
+                    _ => (None, None, String::new()),
+                }
+            };
+        if text.is_empty() && badges.is_empty() {
+            return CollapsedView::Idle;
+        }
+        CollapsedView::Pill {
+            thumb,
+            glyph,
+            text,
+            badges,
+        }
+    }
+
+    /// Logical height the expanded panel wants for the current tab, capped
+    /// at `expanded_height`. Header (padding + tab bar + gap) is 56 px.
+    pub fn panel_height_hint(&self) -> u32 {
+        use perch_ui::tokens::space::{ROW1, ROW2};
+        let rows = |n: usize, h: f32| (n.max(1) as f32 * h) as u32;
+        let body: u32 = match self.tab {
+            None => 60,
+            Some(Tab::Media) => 168,
+            Some(Tab::Tasks) => 80 + rows(self.todos.len() + 1, ROW1),
+            Some(Tab::Clipboard) => 28 + rows(self.clipboard.len(), ROW2),
+            Some(Tab::Shelf) => 28 + rows(self.shelf.len(), ROW2),
+            Some(Tab::Mail) => 28 + rows(self.mail.items().len() + self.mail_problems(), ROW2),
+            Some(Tab::Mixer) => rows(self.sessions.len(), 38.0),
+            Some(Tab::Sounds) => rows(NoiseKind::ALL.len(), 38.0),
+            Some(Tab::Time) => 140,
+            Some(Tab::Tools) => 96,
+        };
+        let max = self.config.notch.expanded_height.max(120);
+        (56 + body + 12).clamp(120, max)
+    }
+
+    fn mail_problems(&self) -> usize {
+        self.mail
+            .accounts()
+            .iter()
+            .filter(|a| a.status.is_problem())
+            .count()
     }
 
     /// Build the view for painting. Settles in-flight screen time first so the

@@ -3,22 +3,32 @@
 //! The renderer takes plain data (a [`Frame`] for geometry/colours and a
 //! [`PanelView`] for content), paints it, and returns the [`Hit`] regions that
 //! clicks resolve against. It holds no application state besides the glyph
-//! cache, so it can be exercised entirely off-screen (`tests/render.rs`).
+//! and shadow caches, so it can be exercised entirely off-screen
+//! (`tests/render.rs`).
 
 use perch_core::platform::TransportCommand;
 use perch_core::view::{
-    Action, Body, CollapsedView, Hit, HitKind, MediaView, PanelView, Row, SliderRow, TasksView,
-    UsageBar,
+    Action, BadgeKind, Body, CollapsedView, Glyph, Hit, HitKind, MediaView, PanelView, Row,
+    SliderRow, TasksView, UsageBar,
 };
-use tiny_skia::{Color, FillRule, Paint, Pixmap, PixmapPaint, Stroke, Transform};
+use tiny_skia::{Color, FillRule, Mask, Paint, Pixmap, PixmapPaint, Stroke, Transform};
 
 use crate::art;
+use crate::effects::Effects;
+use crate::glass::{self, Ctx};
+use crate::icons::Icon;
 use crate::text::TextRenderer;
 use crate::theme::Palette;
+use crate::tokens::{radius, text, Weight};
 
 /// Kept for API compatibility with older callers/tests: what the collapsed
 /// pill shows. New code builds a [`PanelView`] instead.
 pub type Collapsed = CollapsedView;
+
+/// Panel header: padding + tab bar + gap, in logical px.
+const HEADER: f32 = 12.0 + 30.0 + 10.0;
+/// Content becomes clickable once at least this visible.
+const CLICKABLE_ALPHA: f32 = 0.5;
 
 /// Geometry and colours for one frame.
 #[derive(Debug, Clone)]
@@ -27,21 +37,37 @@ pub struct Frame {
     pub width: u32,
     /// Pixmap height in physical pixels.
     pub height: u32,
-    /// HiDPI scale, so text and padding grow with the display.
+    /// Monitor scale.
     pub scale: f32,
-    /// Animation progress, 0.0 collapsed .. 1.0 expanded.
+    /// Open-ness from the notch (0 collapsed, 1 expanded; may slightly exceed 1).
     pub progress: f32,
     /// Colours.
     pub palette: Palette,
-    /// Corner radius override in logical pixels.
+    /// Corner radius override in logical px.
     pub corner_radius: Option<f32>,
-    /// Paint the pill fully opaque (no compositor on X11: the window is
-    /// clipped to the pill shape with XShape instead of alpha).
+    /// No compositor: draw an opaque surface (the shell clips with XShape).
     pub opaque: bool,
+    /// Opacity of the panel content (fades in after the panel opens).
+    pub content_alpha: f32,
+    /// Animated position of the active tab highlight, in tab units; negative
+    /// = use the active tab's index.
+    pub tab_x: f32,
+    /// Cursor position in pixmap pixels, for hover states.
+    pub cursor: Option<(f32, f32)>,
+    /// The OS blurs what is behind the window.
+    pub blur: bool,
+    /// Transparent margin (left, top, right, bottom) around the surface,
+    /// holding its shadow. Physical px.
+    pub inset: (f32, f32, f32, f32),
+    /// Size the panel content is laid out at (physical px), normally the
+    /// final expanded size, so content never reflows while the panel grows.
+    pub layout: Option<(f32, f32)>,
+    /// Shadow blur in logical px (0 = none).
+    pub shadow: f32,
 }
 
 impl Frame {
-    /// A frame of the given size.
+    /// A frame with sensible defaults.
     pub fn new(width: u32, height: u32, scale: f32, palette: Palette) -> Self {
         Self {
             width,
@@ -55,16 +81,24 @@ impl Frame {
             palette,
             corner_radius: None,
             opaque: false,
+            content_alpha: 1.0,
+            tab_x: -1.0,
+            cursor: None,
+            blur: false,
+            inset: (0.0, 0.0, 0.0, 0.0),
+            layout: None,
+            shadow: 0.0,
         }
     }
 }
 
-/// Paints frames. Holds the glyph cache.
+/// Paints frames. Holds the glyph and shadow caches.
 pub struct Renderer {
     text: TextRenderer,
+    fx: Effects,
 }
 
-/// Per-frame drawing context.
+/// Per-frame drawing context for the screens not yet moved to `glass`.
 struct Painter<'a> {
     pm: &'a mut Pixmap,
     text: &'a mut TextRenderer,
@@ -166,16 +200,41 @@ impl Painter<'_> {
 }
 
 impl Renderer {
-    /// Build a renderer, loading the embedded font.
+    /// Build a renderer, loading the embedded fonts.
     pub fn new() -> perch_core::Result<Self> {
         Ok(Self {
             text: TextRenderer::new()?,
+            fx: Effects::default(),
         })
     }
 
     /// Measure text (used by the form windows for layout).
     pub fn text_mut(&mut self) -> &mut TextRenderer {
         &mut self.text
+    }
+
+    /// Logical width the collapsed pill wants for its content (0 = no
+    /// preference; the shell clamps to its configured range).
+    pub fn pill_width(&mut self, collapsed: &CollapsedView, scale: f32) -> u32 {
+        let s = scale.max(0.1);
+        let w = |t: &mut TextRenderer, str: &str, px: f32, wt: Weight| {
+            t.measure_w(str, px * s, wt).width / s
+        };
+        let width = match collapsed {
+            CollapsedView::Idle => 0.0,
+            CollapsedView::Message(m) => 44.0 + w(&mut self.text, m, text::BODY.0, Weight::Medium),
+            CollapsedView::Pill { text, badges, .. } => {
+                let mut total = 8.0 + 20.0 + 10.0 + 12.0;
+                if !text.is_empty() {
+                    total += w(&mut self.text, text, text::BODY.0, Weight::Medium);
+                }
+                for b in badges {
+                    total += 8.0 + badge_width(&mut self.text, b.count, 1.0);
+                }
+                total
+            }
+        };
+        width.ceil() as u32
     }
 
     /// Paint a frame and return its hit regions. Returns an empty list (and
@@ -185,121 +244,295 @@ impl Renderer {
             return Vec::new();
         }
         pm.fill(Color::TRANSPARENT);
-        let w = pm.width() as f32;
-        let h = pm.height() as f32;
+        let (w, h) = (pm.width() as f32, pm.height() as f32);
         let s = frame.scale;
         let mut pal = frame.palette;
         if frame.opaque {
+            pal.surface.set_alpha(1.0);
             pal.bg.set_alpha(1.0);
         }
-        let mut p = Painter {
-            pm,
-            text: &mut self.text,
-            pal,
-            s,
-            hits: Vec::new(),
-        };
-
-        // Pill body + hairline border.
-        let radius = frame
-            .corner_radius
-            .map(|r| r * s)
-            .or(Some(if frame.progress >= 0.5 {
-                18.0 * s
-            } else {
-                h / 2.0
-            }));
-        let body = art::pill(0.0, 0.0, w, h, radius);
-        p.fill(body.clone(), pal.bg);
-        p.stroke(body, pal.border, 1.0_f32.max(s * 0.75));
-
-        if frame.progress < 0.5 {
-            draw_collapsed(&mut p, &view.collapsed, w, h);
+        let (il, it, ir, ib) = frame.inset;
+        let panel = (il, it, (w - il - ir).max(1.0), (h - it - ib).max(1.0));
+        let open = frame.progress >= 0.5;
+        let r = frame.corner_radius.map(|r| r * s).unwrap_or(if open {
+            radius::PANEL * s
         } else {
-            draw_expanded(&mut p, view, w, h);
+            panel.3 / 2.0
+        });
+        let mut ctx = Ctx::new(pm, &mut self.text, &mut self.fx, pal, s);
+        ctx.cursor = frame.cursor;
+        glass::surface(&mut ctx, panel, r, None, 0.0);
+
+        if open {
+            if frame.content_alpha > 0.0 {
+                ctx.alpha = frame.content_alpha.clamp(0.0, 1.0);
+                draw_panel(&mut ctx, view, panel, frame);
+            }
+        } else {
+            // The pill's own content fades out as the panel starts to grow.
+            ctx.alpha = (1.0 - frame.progress / 0.3).clamp(0.0, 1.0);
+            if ctx.alpha > 0.0 {
+                draw_pill(&mut ctx, &view.collapsed, panel);
+            }
+            // The collapsed pill is hover-only: nothing to click.
+            ctx.hits.clear();
         }
-        p.hits
-    }
-}
+        let mut hits = std::mem::take(&mut ctx.hits);
+        drop(ctx);
 
-fn draw_collapsed(p: &mut Painter<'_>, collapsed: &CollapsedView, w: f32, h: f32) {
-    let s = p.s;
-    let pad = 10.0 * s;
-    let icon = (h - 2.0 * pad).clamp(8.0 * s, 22.0 * s);
-    let fg = p.pal.fg;
-    let accent = p.pal.accent.from;
-    p.fill(art::mascot(pad, (h - icon) / 2.0, icon), fg);
-    p.fill(art::mascot_eye(pad, (h - icon) / 2.0, icon), accent);
-
-    let (label, color) = match collapsed {
-        CollapsedView::Idle => return,
-        CollapsedView::Status(t) | CollapsedView::Message(t) => (t.as_str(), accent),
-        CollapsedView::NowPlaying(t) => (t.as_str(), fg),
-    };
-    let px = (h * 0.42).clamp(9.0, 20.0 * s);
-    let x = pad + icon + 8.0 * s;
-    p.text_in(label, x, 0.0, h, px, color, (w - x - pad).max(0.0));
-}
-
-fn draw_expanded(p: &mut Painter<'_>, view: &PanelView, w: f32, h: f32) {
-    let s = p.s;
-    let pad = 14.0 * s;
-    let strip_h = 22.0 * s;
-    let top = 10.0 * s;
-
-    // Tab strip.
-    let mut x = pad;
-    let px = 12.0 * s;
-    let icons_w = 2.0 * strip_h + 6.0 * s;
-    for tab in &view.tabs {
-        let label = tab.label();
-        let tw = p.measure(label, px) + 16.0 * s;
-        if x + tw > w - pad - icons_w {
-            break;
+        // Content is laid out at the final size; while the panel is still
+        // growing, cut everything outside its rounded shape.
+        let settled = frame
+            .layout
+            .map(|(lw, lh)| (lw - panel.2).abs() < 0.5 && (lh - panel.3).abs() < 0.5);
+        if open && settled == Some(false) {
+            clip_outside(pm, panel, r);
         }
-        let selected = view.tab == Some(*tab);
-        if selected {
-            p.rrect(
-                x,
-                top,
-                tw,
-                strip_h,
-                strip_h / 2.0,
-                with_alpha(p.pal.fg, 0.14),
+        if open && frame.content_alpha < CLICKABLE_ALPHA {
+            hits.clear();
+        }
+        hits.retain(|hit| {
+            hit.x >= panel.0 - 0.5
+                && hit.y >= panel.1 - 0.5
+                && hit.x + hit.w <= panel.0 + panel.2 + 0.5
+                && hit.y + hit.h <= panel.1 + panel.3 + 0.5
+        });
+        if frame.shadow > 0.0 && !frame.opaque {
+            self.fx.shadow(
+                pm,
+                panel.0,
+                panel.1,
+                panel.2,
+                panel.3,
+                r,
+                frame.shadow * s,
+                0.40,
             );
         }
-        let color = if selected { p.pal.fg } else { p.pal.muted };
-        p.text_in(label, x + 8.0 * s, top, strip_h, px, color, tw);
-        p.button(x, top, tw, strip_h, Action::SelectTab(*tab));
-        x += tw + 2.0 * s;
+        hits
+    }
+}
+
+/// Zero every pixel outside the rounded rect.
+fn clip_outside(pm: &mut Pixmap, (x, y, w, h): (f32, f32, f32, f32), r: f32) {
+    let Some(mut mask) = Mask::new(pm.width(), pm.height()) else {
+        return;
+    };
+    let Some(path) = art::rounded_rect(x, y, w, h, r) else {
+        return;
+    };
+    mask.fill_path(&path, FillRule::Winding, true, Transform::identity());
+    for (px, m) in pm.pixels_mut().iter_mut().zip(mask.data()) {
+        match *m {
+            255 => {}
+            0 => *px = tiny_skia::PremultipliedColorU8::TRANSPARENT,
+            m => {
+                let k = |c: u8| ((u16::from(c) * u16::from(m) + 127) / 255) as u8;
+                if let Some(c) = tiny_skia::PremultipliedColorU8::from_rgba(
+                    k(px.red()),
+                    k(px.green()),
+                    k(px.blue()),
+                    k(px.alpha()),
+                ) {
+                    *px = c;
+                }
+            }
+        }
+    }
+}
+
+fn glyph_icon(g: Glyph) -> Icon {
+    match g {
+        Glyph::Music => Icon::Music,
+        Glyph::Timer => Icon::Clock,
+        Glyph::Mail => Icon::Mail,
+        Glyph::Clock => Icon::Clock,
+        Glyph::Warning => Icon::Warning,
+    }
+}
+
+/// Logical width of one count badge (mail icon + number).
+fn badge_width(t: &mut TextRenderer, count: u32, s: f32) -> f32 {
+    let label = count_label(count);
+    (8.0 + 12.0 + 4.0) * s
+        + t.measure_tabular(&label, text::CAPTION.0 * s, Weight::Bold)
+            .width
+        + 8.0 * s
+}
+
+fn count_label(count: u32) -> String {
+    if count > 99 {
+        "99+".into()
+    } else {
+        count.to_string()
+    }
+}
+
+/// The collapsed pill: mascot when idle; otherwise cover/glyph, text and
+/// badges.
+fn draw_pill(ctx: &mut Ctx<'_>, collapsed: &CollapsedView, (x, y, w, h): (f32, f32, f32, f32)) {
+    let s = ctx.s;
+    let inner = 8.0 * s;
+    match collapsed {
+        CollapsedView::Idle => {
+            let icon = (h - 2.0 * 6.0 * s).clamp(8.0 * s, 22.0 * s);
+            let (mx, my) = (x + 10.0 * s, y + (h - icon) / 2.0);
+            let fg = ctx.pal.fg;
+            let eye = ctx.pal.accent.from;
+            ctx.fill(art::mascot(mx, my, icon), fg);
+            ctx.fill(art::mascot_eye(mx, my, icon), eye);
+        }
+        CollapsedView::Message(m) => {
+            let tw = ctx.measure(m, text::BODY).min(w - 2.0 * inner);
+            let accent = ctx.pal.accent.from;
+            ctx.text(m, x + (w - tw) / 2.0, y, h, text::BODY, accent, tw);
+        }
+        CollapsedView::Pill {
+            thumb,
+            glyph,
+            text: label,
+            badges,
+        } => {
+            let lead = (h - 12.0 * s).clamp(10.0 * s, 20.0 * s);
+            let lx = x + inner;
+            let ly = y + (h - lead) / 2.0;
+            let mut tx = lx;
+            if let Some((px, side)) = thumb {
+                glass::image(ctx, px, *side, (lx, ly, lead, lead), lead * 0.3);
+                tx += lead + 10.0 * s;
+            } else if let Some(g) = glyph {
+                let accent = ctx.pal.accent.from;
+                ctx.icon(glyph_icon(*g), lx, ly, lead, accent);
+                tx += lead + 10.0 * s;
+            }
+            // Badges from the right.
+            let mut right = x + w - inner;
+            let bh = (h - 12.0 * s).clamp(12.0 * s, 20.0 * s);
+            for b in badges.iter().rev() {
+                let bw = badge_width(ctx.text, b.count, s);
+                let bx = right - bw;
+                let by = y + (h - bh) / 2.0;
+                let (bg, fg) = match b.kind {
+                    BadgeKind::Mail => (
+                        Color::from_rgba8(120, 170, 255, 64),
+                        Color::from_rgba8(188, 212, 255, 255),
+                    ),
+                };
+                ctx.rrect((bx, by, bw, bh), bh / 2.0, bg);
+                let isz = 12.0 * s;
+                ctx.icon(Icon::Mail, bx + 8.0 * s, by + (bh - isz) / 2.0, isz, fg);
+                let label = count_label(b.count);
+                let px = text::CAPTION.0 * s;
+                let m = ctx.text.measure_tabular(&label, px, Weight::Bold);
+                let base = by + (bh + m.ascent - m.descent) / 2.0;
+                let c = ctx.fade(fg, 1.0);
+                ctx.text.draw_tabular(
+                    ctx.pm,
+                    &label,
+                    bx + 24.0 * s,
+                    base,
+                    px,
+                    c,
+                    m.width + 2.0,
+                    Weight::Bold,
+                );
+                right = bx - 8.0 * s;
+            }
+            if !label.is_empty() {
+                let fg = ctx.pal.fg;
+                ctx.text(label, tx, y, h, text::BODY, fg, (right - tx).max(0.0));
+            }
+        }
+    }
+}
+
+/// Panel: icon tabs, pin and settings, then the body, laid out at the final
+/// expanded size.
+fn draw_panel(ctx: &mut Ctx<'_>, view: &PanelView, panel: (f32, f32, f32, f32), frame: &Frame) {
+    let s = ctx.s;
+    let (lw, lh) = frame.layout.unwrap_or((panel.2, panel.3));
+    // Centre the layout horizontally, anchor it to the top.
+    let x = panel.0 + (panel.2 - lw) / 2.0;
+    let y = panel.1;
+    let pad = 12.0 * s;
+    let bar = 30.0 * s;
+    let btn = 26.0 * s;
+
+    // Pin + settings on the right.
+    let gear_x = x + lw - pad - btn;
+    let pin_x = gear_x - btn - 4.0 * s;
+    let by = y + pad + (bar - btn) / 2.0;
+    for (bx, icon, action, active) in [
+        (pin_x, Icon::Pin, Action::PinToggle, view.pinned),
+        (gear_x, Icon::Gear, Action::OpenSettings, false),
+    ] {
+        let rect = (bx, by, btn, btn);
+        if ctx.hovered(rect) {
+            ctx.rrect(rect, btn / 2.0, ctx.pal.raised[1]);
+        }
+        let color = if active {
+            ctx.pal.accent.from
+        } else {
+            ctx.fade(ctx.pal.fg, 0.7)
+        };
+        let isz = 15.0 * s;
+        ctx.icon(
+            icon,
+            bx + (btn - isz) / 2.0,
+            by + (btn - isz) / 2.0,
+            isz,
+            color,
+        );
+        ctx.button(rect, action);
     }
 
-    // Pin + settings icons, right-aligned.
-    let gx = w - pad - strip_h;
-    let gear_color = p.pal.muted;
-    p.stroke(
-        art::gear(gx + strip_h * 0.2, top + strip_h * 0.2, strip_h * 0.6),
-        gear_color,
-        1.4 * s,
-    );
-    p.button(gx, top, strip_h, strip_h, Action::OpenSettings);
-    let pin_x = gx - strip_h - 6.0 * s;
-    let pin_color = if view.pinned {
-        p.pal.accent.from
-    } else {
-        p.pal.muted
-    };
-    p.fill(
-        art::pin(pin_x + strip_h * 0.22, top + strip_h * 0.18, strip_h * 0.56),
-        pin_color,
-    );
-    p.button(pin_x, top, strip_h, strip_h, Action::PinToggle);
+    // Tabs.
+    let items: Vec<(Icon, Action)> = view
+        .tabs
+        .iter()
+        .map(|t| (Icon::for_tab(*t), Action::SelectTab(*t)))
+        .collect();
+    if !items.is_empty() {
+        let active = view
+            .tab
+            .and_then(|t| view.tabs.iter().position(|x| *x == t))
+            .unwrap_or(0);
+        let hx = if frame.tab_x >= 0.0 {
+            frame.tab_x
+        } else {
+            active as f32
+        };
+        let tw = (pin_x - 8.0 * s - (x + pad)).max(0.0);
+        glass::tabs(ctx, (x + pad, y + pad, tw, bar), &items, active, hx);
+    }
 
-    // Body.
-    let by = top + strip_h + 8.0 * s;
-    let bh = (h - by - 12.0 * s).max(0.0);
-    let bx = pad;
-    let bw = (w - 2.0 * pad).max(0.0);
+    // Body, through the older painter for screens not yet restyled.
+    let body = (
+        x + pad,
+        y + HEADER * s,
+        lw - 2.0 * pad,
+        (lh - HEADER * s - pad).max(0.0),
+    );
+    let mut pal = ctx.pal;
+    let a = ctx.alpha;
+    for c in [&mut pal.fg, &mut pal.muted, &mut pal.surface, &mut pal.bg] {
+        c.apply_opacity(a);
+    }
+    pal.accent.from.apply_opacity(a);
+    let mut p = Painter {
+        pm: ctx.pm,
+        text: ctx.text,
+        pal,
+        s,
+        hits: Vec::new(),
+    };
+    draw_body(&mut p, view, body);
+    let hits = std::mem::take(&mut p.hits);
+    ctx.hits.extend(hits);
+}
+
+fn draw_body(p: &mut Painter<'_>, view: &PanelView, (bx, by, bw, bh): (f32, f32, f32, f32)) {
+    let s = p.s;
     match &view.body {
         Body::Media(m) => draw_media(p, m, bx, by, bw, bh),
         Body::Tasks(t) => draw_tasks(p, t, bx, by, bw, bh),
