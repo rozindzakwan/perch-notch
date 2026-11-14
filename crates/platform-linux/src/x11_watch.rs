@@ -685,7 +685,7 @@ pub fn modifier_mask(a: &perch_core::hotkey::Accel) -> u16 {
     m
 }
 
-fn keycode_for(conn: &RustConnection, sym: u32) -> Option<u8> {
+pub(crate) fn keycode_for(conn: &RustConnection, sym: u32) -> Option<u8> {
     let setup = conn.setup();
     let (min, max) = (setup.min_keycode, setup.max_keycode);
     let map = conn

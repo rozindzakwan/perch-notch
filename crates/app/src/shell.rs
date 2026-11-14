@@ -36,9 +36,24 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(8);
 /// Debounce for config-file change notifications (editors write in bursts).
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(150);
 
+/// Messages from the dictation workers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpeechMsg {
+    /// Show a status line in the notch.
+    Status(String),
+    /// Transcribed text, ready to paste.
+    Text(String),
+}
+
 /// Events delivered into the loop from other threads.
 #[derive(Debug)]
 pub enum UserEvent {
+    /// Dictation progress or result.
+    Speech(SpeechMsg),
+    /// The camera produced a new mirror frame.
+    CameraFrame,
+    /// The camera stopped (error message).
+    CameraStopped(String),
     /// Something a platform backend reported.
     Platform(PlatformEvent),
     /// A lyrics lookup finished.
@@ -69,6 +84,12 @@ pub struct Shell {
     settings: Option<FormWindow>,
     dialog: Option<FormWindow>,
     dialog_error: Option<String>,
+    shot: Option<perch_ui::shot::ShotWindow>,
+    mirror: Option<perch_ui::mirror::MirrorWindow>,
+    #[cfg(feature = "camera")]
+    capture: Option<crate::camera::Capture>,
+    /// A screenshot is due once the notch has collapsed out of the way.
+    shot_at: Option<Instant>,
     cursor: (f32, f32),
     press: Option<(f32, f32)>,
     reload_at: Option<Instant>,
@@ -122,6 +143,11 @@ impl Shell {
             settings: None,
             dialog: None,
             dialog_error: None,
+            shot: None,
+            mirror: None,
+            #[cfg(feature = "camera")]
+            capture: None,
+            shot_at: None,
             cursor: (0.0, 0.0),
             press: None,
             reload_at: None,
@@ -292,7 +318,9 @@ impl Shell {
             perch_core::view::Body::Media(m) => m.lyric.unwrap_or_default(),
             _ => String::new(),
         };
+        let shot_open = self.shot.is_some();
         let status = Status {
+            shot_open,
             state: format!("{:?}", self.notch.state()),
             pill,
             visible,
@@ -510,9 +538,18 @@ impl Shell {
                 Effect::SaveUsage => crate::extras::save_usage(self.model.usage()),
                 Effect::OpenSettings => self.open_settings(el),
                 Effect::OpenTodoDialog => self.open_todo_dialog(el),
-                Effect::Screenshot => crate::extras::screenshot(el, &mut self.model),
-                Effect::CameraToggle => crate::extras::camera_toggle(el, &mut self.model),
-                Effect::DictateToggle => crate::extras::dictate_toggle(&mut self.model),
+                Effect::Screenshot => {
+                    if self.shot.is_none() {
+                        self.notch.handle(NotchEvent::ForceCollapse);
+                        self.after_notch_change(el);
+                        self.shot_at = Some(Instant::now() + Duration::from_millis(250));
+                    }
+                }
+                Effect::CameraToggle => self.toggle_mirror(el),
+                Effect::DictateToggle => {
+                    crate::extras::dictate_toggle(&mut self.model, self.proxy.clone())
+                }
+                Effect::DictateRelease => crate::extras::dictate_release(&mut self.model),
                 Effect::ToggleNotch => {
                     self.notch.handle(NotchEvent::Toggle);
                     self.after_notch_change(el);
@@ -722,6 +759,139 @@ impl Shell {
         let _ = el;
     }
 
+    /// Show or hide the camera mirror under the notch.
+    fn toggle_mirror(&mut self, el: &ActiveEventLoop) {
+        if self.mirror.is_some() {
+            self.close_mirror();
+            return;
+        }
+        #[cfg(feature = "camera")]
+        {
+            let Some(m) = self.resolve_monitor() else {
+                return;
+            };
+            let s = m.scale.max(1.0);
+            let (w, h) = ((320.0 * s) as u32, (240.0 * s) as u32);
+            let pill = self.last_pill.map(|(r, _)| r).unwrap_or(m.full());
+            let x = pill.center_x() - w as i32 / 2;
+            let y = pill.y + pill.h as i32 + (8.0 * s) as i32;
+            let slot: perch_ui::mirror::FrameSlot = Default::default();
+            match perch_ui::mirror::MirrorWindow::open(el, slot.clone(), x, y, w, h) {
+                Ok(win) => match crate::camera::start(slot, self.proxy.clone()) {
+                    Ok(c) => {
+                        self.capture = Some(c);
+                        self.mirror = Some(win);
+                    }
+                    Err(e) => self.model.flash(e, Now::real()),
+                },
+                Err(e) => log::warn!("mirror window: {e}"),
+            }
+        }
+        #[cfg(not(feature = "camera"))]
+        {
+            let _ = el;
+            self.model
+                .flash("Camera mirror is not in this build", Now::real());
+        }
+        self.request_redraw();
+    }
+
+    fn close_mirror(&mut self) {
+        #[cfg(feature = "camera")]
+        {
+            self.capture = None; // joins the thread, frees the camera
+        }
+        self.mirror = None;
+        crate::sys::trim_heap();
+    }
+
+    /// Capture the notch's monitor and open the selection overlay.
+    fn open_screenshot(&mut self, el: &ActiveEventLoop) {
+        let Some(m) = self.resolve_monitor() else {
+            return;
+        };
+        let rect = m.full();
+        let shot = crate::sys::capture(rect).and_then(|(rgba, w, h)| {
+            let state = perch_ui::shot::ShotState::new(&rgba, w, h)
+                .ok_or_else(|| perch_core::Error::backend("capture too large"))?;
+            perch_ui::shot::ShotWindow::open(el, state, rect.x, rect.y)
+        });
+        match shot {
+            Ok(w) => self.shot = Some(w),
+            Err(e) => {
+                log::warn!("screenshot failed: {e}");
+                self.model.flash("Screenshot failed", Now::real());
+                self.request_redraw();
+            }
+        }
+    }
+
+    fn handle_shot_event(&mut self, el: &ActiveEventLoop, event: &WindowEvent) {
+        use perch_ui::shot::ShotEvent;
+        let Some(win) = &mut self.shot else { return };
+        let events = win.handle(event);
+        let now = Now::real();
+        // Every overlay event ends the screenshot; only the first matters.
+        if let Some(ev) = events.into_iter().next() {
+            let message = match ev {
+                ShotEvent::Cancel => None,
+                ShotEvent::Copy(rgba, w, h) => Some(match encode_png(&rgba, w, h) {
+                    Some(png) => {
+                        let content = perch_core::clipboard::ClipboardContent::image(
+                            png,
+                            w,
+                            h,
+                            perch_core::clipboard::ImageFormat::Png,
+                        );
+                        match self.services.ensure_clipboard().map(|c| c.write(&content)) {
+                            Some(Ok(())) => "Screenshot copied".to_string(),
+                            _ => "Could not copy the screenshot".to_string(),
+                        }
+                    }
+                    None => "Could not encode the screenshot".to_string(),
+                }),
+                ShotEvent::Save(rgba, w, h) => Some(match save_shot(&rgba, w, h, now.unix) {
+                    Ok(path) => format!(
+                        "Saved {}",
+                        path.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    ),
+                    Err(e) => {
+                        log::warn!("saving the screenshot: {e}");
+                        "Could not save the screenshot".to_string()
+                    }
+                }),
+                ShotEvent::Ocr(rgba, w, h) => Some(match crate::sys::ocr(&rgba, w, h) {
+                    Ok(text) if text.trim().is_empty() => "No text found".to_string(),
+                    Ok(text) => {
+                        let n = text.chars().count();
+                        let content = perch_core::clipboard::ClipboardContent::text(text);
+                        match self.services.ensure_clipboard().map(|c| c.write(&content)) {
+                            Some(Ok(())) => format!("Copied {n} characters of text"),
+                            _ => "Could not copy the text".to_string(),
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("OCR: {e}");
+                        if e.is_degradable() {
+                            "Text recognition is not available".to_string()
+                        } else {
+                            "Text recognition failed".to_string()
+                        }
+                    }
+                }),
+            };
+            self.shot = None;
+            crate::sys::trim_heap();
+            if let Some(m) = message {
+                self.model.flash(m, now);
+            }
+            self.request_redraw();
+            self.schedule(el);
+        }
+    }
+
     fn handle_dialog_event(&mut self, el: &ActiveEventLoop, event: &WindowEvent) {
         let Some(win) = &mut self.dialog else { return };
         let events = win.handle(event);
@@ -772,6 +942,9 @@ impl Shell {
         }
         if let Some(d) = self.model.next_deadline(Now::real(), self.expanded()) {
             take(d.max(Duration::from_millis(10)));
+        }
+        if let Some(at) = self.shot_at {
+            take(at.saturating_duration_since(now));
         }
         if let Some(at) = self.reload_at {
             take(at.saturating_duration_since(now));
@@ -853,6 +1026,38 @@ impl ApplicationHandler<UserEvent> for Shell {
         }
         match event {
             UserEvent::Platform(ev) => self.handle_platform(el, ev),
+            UserEvent::CameraFrame => {
+                if let Some(m) = &self.mirror {
+                    m.frame_ready();
+                }
+            }
+            UserEvent::CameraStopped(e) => {
+                log::warn!("camera: {e}");
+                self.close_mirror();
+                self.model.flash(e, Now::real());
+                self.request_redraw();
+            }
+            UserEvent::Speech(SpeechMsg::Status(s)) => {
+                self.model.flash(s, Now::real());
+                self.request_redraw();
+            }
+            UserEvent::Speech(SpeechMsg::Text(t)) => {
+                let words = t.split_whitespace().count();
+                let content = perch_core::clipboard::ClipboardContent::text(t);
+                let copied = matches!(
+                    self.services.ensure_clipboard().map(|c| c.write(&content)),
+                    Some(Ok(()))
+                );
+                let msg = if !copied {
+                    "Could not put the text on the clipboard".to_string()
+                } else if crate::sys::paste().is_ok() {
+                    format!("Typed {words} words")
+                } else {
+                    format!("{words} words copied; paste with Ctrl+V")
+                };
+                self.model.flash(msg, Now::real());
+                self.request_redraw();
+            }
             UserEvent::Lyrics { key, lrc } => {
                 let fx = self.model.lyrics_loaded(&key, lrc.as_deref());
                 self.run_effects(el, fx);
@@ -864,6 +1069,17 @@ impl ApplicationHandler<UserEvent> for Shell {
         log::trace!("window_event {id:?}: {event:?}");
         if self.settings.as_ref().is_some_and(|s| s.id() == id) {
             self.handle_settings_event(el, &event);
+            return;
+        }
+        if self.mirror.as_ref().is_some_and(|m| m.id() == id) {
+            let close = self.mirror.as_mut().is_some_and(|m| m.handle(&event));
+            if close {
+                self.close_mirror();
+            }
+            return;
+        }
+        if self.shot.as_ref().is_some_and(|s| s.id() == id) {
+            self.handle_shot_event(el, &event);
             return;
         }
         if self.dialog.as_ref().is_some_and(|d| d.id() == id) {
@@ -981,6 +1197,10 @@ impl ApplicationHandler<UserEvent> for Shell {
             return;
         }
         let now = Instant::now();
+        if self.shot_at.is_some_and(|at| at <= now) {
+            self.shot_at = None;
+            self.open_screenshot(el);
+        }
         if self.reload_at.is_some_and(|at| at <= now) {
             self.reload_at = None;
             self.reload_config();
@@ -1013,4 +1233,25 @@ impl ApplicationHandler<UserEvent> for Shell {
             persist::save_todos(dir, self.model.todos());
         }
     }
+}
+
+/// Encode straight RGBA as PNG.
+fn encode_png(rgba: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let enc = image::codecs::png::PngEncoder::new(&mut out);
+    image::ImageEncoder::write_image(enc, rgba, w, h, image::ExtendedColorType::Rgba8).ok()?;
+    Some(out)
+}
+
+/// Save a screenshot under the user's Pictures folder (`Pictures/Perch`), or
+/// the data directory when there is no Pictures folder.
+fn save_shot(rgba: &[u8], w: u32, h: u32, unix: u64) -> std::io::Result<PathBuf> {
+    let dir = directories::UserDirs::new()
+        .and_then(|u| u.picture_dir().map(|p| p.join("Perch")))
+        .or_else(|| persist::data_dir().map(|d| d.join("screenshots")))
+        .ok_or_else(|| std::io::Error::other("no folder to save into"))?;
+    let png = encode_png(rgba, w, h).ok_or_else(|| std::io::Error::other("PNG encoding failed"))?;
+    let path = dir.join(format!("perch-shot-{unix}.png"));
+    persist::write_atomic(&path, &png)?;
+    Ok(path)
 }

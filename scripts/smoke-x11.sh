@@ -94,6 +94,7 @@ todo = true
 clipboard = true
 shelf = true
 screen_time = true
+screenshot = true
 CFG
 
 T0=$(date +%s%N)
@@ -216,6 +217,25 @@ if [ -n "$CLIP_OWNER" ] && [ -x "$CLIP_OWNER" ]; then
 else
     info "clipboard end-to-end skipped (set PERCH_CLIP_OWNER)"
 fi
+
+# Screenshot: open the overlay from the CLI, drag a region, Enter copies it.
+"$BIN" shot
+for _ in $(seq 50); do [ "$(STATUS .shot_open)" = true ] && break; sleep 0.1; done
+check shot_overlay_opens "$([ "$(STATUS .shot_open)" = true ] && echo 1 || echo 0)" "shot_open=$(STATUS .shot_open)"
+SHOT=$(xdotool search --name '^Perch screenshot$' | head -1 || true)
+if [ -n "$SHOT" ]; then
+    xdotool windowactivate --sync "$SHOT" 2>/dev/null || true
+    xdotool mousemove 700 300 mousedown 1 mousemove 800 380 mousemove 900 450 mouseup 1
+    sleep 0.3
+    import -window root -crop 560x320+680+260 "$OUT/x11-shot-$COMP.png" 2>/dev/null || true
+    xdotool key --window "$SHOT" Return
+    for _ in $(seq 50); do [ "$(STATUS .shot_open)" = false ] && break; sleep 0.1; done
+    TARGETS=$(xclip -o -selection clipboard -t TARGETS 2>/dev/null || true)
+    check shot_copies_png "$(echo "$TARGETS" | grep -q image/png && echo 1 || echo 0)" "clipboard targets: $(echo $TARGETS | tr '\n' ' ')"
+    SIZE=$(xclip -o -selection clipboard -t image/png 2>/dev/null | wc -c)
+    check shot_png_nonempty "$([ "$SIZE" -gt 100 ] && echo 1 || echo 0)" "$SIZE bytes"
+fi
+xdotool mousemove 40 900
 
 # Fullscreen auto-hide (EWMH _NET_WM_STATE_FULLSCREEN via the WM). The
 # victim is Perch's own settings window: a normal, focusable top-level.

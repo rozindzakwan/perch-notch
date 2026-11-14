@@ -49,6 +49,7 @@ if (-not ([System.Management.Automation.PSTypeName]'PerchNative').Type) {
 Add-Type -Namespace '' -Name PerchNative -MemberDefinition @'
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);
     [DllImport("user32.dll", SetLastError=true)] public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
@@ -186,6 +187,7 @@ todo = true
 clipboard = true
 shelf = true
 screen_time = true
+screenshot = true
 "@ | Set-Content -Path $cfg -Encoding ascii
 # Machine-readable state from the app, and an isolated data dir so the CLI
 # checks never touch the user's real to-dos.
@@ -325,6 +327,31 @@ try {
     # The foreground changes above (to the test window and back) are what
     # screen time records.
     Check 'screen_time_records' ($st.usage_apps -ge 1) "apps today=$($st.usage_apps)"
+
+    # Runs after the foreground-dependent checks: once Perch's overlay has
+    # held focus, Windows' foreground lock stops the test process from
+    # bringing its own window to the front.
+    # --- screenshot: overlay, drag a region, Enter copies a PNG -------------
+    [System.Windows.Forms.Clipboard]::Clear()
+    Invoke-Perch @('shot')
+    $ok = WaitStatus { (Read-Status).shot_open -eq $true }
+    Check 'shot_overlay_opens' $ok "shot_open=$((Read-Status).shot_open)"
+    if ($ok) {
+        Start-Sleep -Milliseconds 400
+        Move-MouseAbsolute 700 300
+        [PerchNative]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero)   # left down
+        Move-MouseAbsolute 800 380
+        Move-MouseAbsolute 900 450
+        [PerchNative]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)   # left up
+        Start-Sleep -Milliseconds 300
+        [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+        $ok = WaitStatus { (Read-Status).shot_open -eq $false }
+        Check 'shot_closes_after_copy' $ok "shot_open=$((Read-Status).shot_open)"
+        $img = [System.Windows.Forms.Clipboard]::GetImage()
+        Check 'shot_copies_image' ($null -ne $img) "$(if ($img) { "$($img.Width)x$($img.Height)" } else { 'no image on the clipboard' })"
+        Move-MouseAbsolute $parkX $parkY
+    }
+
 
     # --- focus must never move ----------------------------------------------
     $fgAfter = [PerchNative]::GetForegroundWindow()

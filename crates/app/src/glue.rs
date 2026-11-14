@@ -106,6 +106,18 @@ impl Services {
         self.os.set_tray_autostart(on);
     }
 
+    /// The clipboard, opened on demand even when the clipboard feature is off
+    /// (the screenshot tool copies images and OCR text).
+    pub fn ensure_clipboard(&mut self) -> Option<&mut Box<dyn ClipboardAccess>> {
+        if self.clipboard.is_none() {
+            match self.os.clipboard() {
+                Ok(c) => self.clipboard = Some(c),
+                Err(e) => log::warn!("clipboard unavailable: {e}"),
+            }
+        }
+        self.clipboard.as_mut()
+    }
+
     /// Register global hotkeys (replaces any previous set).
     pub fn set_hotkeys(&self, bindings: Vec<perch_core::hotkey::Binding>) {
         let flags = self.os.flags();

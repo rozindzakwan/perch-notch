@@ -8,6 +8,8 @@
 //! `unsafe` and no Win32 or X11 types.
 
 pub mod backends;
+#[cfg(feature = "camera")]
+pub mod camera;
 pub mod cli;
 pub mod extras;
 pub mod features;
@@ -18,6 +20,8 @@ pub mod lyrics;
 pub mod model;
 pub mod persist;
 pub mod shell;
+#[cfg(feature = "speech")]
+pub mod speech;
 pub mod sys;
 #[cfg(windows)]
 pub mod tray;

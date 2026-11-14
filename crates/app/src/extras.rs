@@ -8,7 +8,6 @@ use std::path::Path;
 
 use perch_core::noise::NoiseMix;
 use perch_core::usage::UsageTracker;
-use winit::event_loop::ActiveEventLoop;
 
 use crate::model::{Effect, Model, Now};
 
@@ -266,19 +265,27 @@ pub mod usage_store {
     pub use super::usage_db::{open, read, write};
 }
 
-/// Start a screenshot.
-pub fn screenshot(_el: &ActiveEventLoop, model: &mut Model) {
-    model.flash("Screenshot is not in this build", Now::real());
+/// Start or stop dictation (press-to-toggle; see [`dictate_release`] for
+/// push-to-talk).
+pub fn dictate_toggle(
+    model: &mut Model,
+    proxy: winit::event_loop::EventLoopProxy<crate::shell::UserEvent>,
+) {
+    #[cfg(feature = "speech")]
+    crate::speech::toggle(model, proxy);
+    #[cfg(not(feature = "speech"))]
+    {
+        let _ = proxy;
+        model.flash("Dictation is not in this build", Now::real());
+    }
 }
 
-/// Toggle the camera mirror.
-pub fn camera_toggle(_el: &ActiveEventLoop, model: &mut Model) {
-    model.flash("Camera mirror is not in this build", Now::real());
-}
-
-/// Toggle dictation.
-pub fn dictate_toggle(model: &mut Model) {
-    model.flash("Dictation is not in this build", Now::real());
+/// The push-to-talk key was released.
+pub fn dictate_release(model: &mut Model) {
+    #[cfg(feature = "speech")]
+    crate::speech::release(model);
+    #[cfg(not(feature = "speech"))]
+    let _ = model;
 }
 
 /// A global hotkey fired. Presses run the bound command; releasing the

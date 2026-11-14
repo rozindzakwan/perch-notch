@@ -201,3 +201,30 @@ clipboard (`text/uri-list` via `arboard`), which file managers paste.
   as absolute values on every app switch and on exit, last 30 days restored at
   start. On X11 the desktop gaining focus is reported as "desktop", so the last
   app stops accruing time.
+
+## ADR-015: Phase 5 (heavy features)
+
+- **Hotkeys.** Windows: `RegisterHotKey` on the event thread (press only, so
+  dictation toggles). X11: `XGrabKey` on the root window for every CapsLock /
+  NumLock combination, XKB detectable auto-repeat for clean push-to-talk; a
+  `BadAccess` grab means the desktop already owns the shortcut and is logged.
+  Only shortcuts for live features are grabbed. The CLI verbs remain the
+  fallback for keybindings in Cinnamon's Keyboard settings.
+- **Screenshot.** Capture: GDI `BitBlt` (Windows), X11 `GetImage` (32-bit
+  visuals). The overlay (`perch_ui::shot`) is pure state + painting, tested
+  without a window. Copy puts a PNG on the clipboard, Save writes
+  `Pictures/Perch/perch-shot-<unix>.png`, "Copy text" runs OCR:
+  `Windows.Media.Ocr` (built in, offline) or the `tesseract` CLI (deb
+  Recommends). The notch collapses before capture (250 ms deadline).
+  Wayland: not implemented (would need the xdg-desktop-portal Screenshot API).
+- **Camera mirror.** `nokhwa` (MSMF / V4L2) on a capture thread that exists
+  only while the mirror is open; frames downscaled to <= 640 px wide.
+- **Dictation.** `whisper-rs` (whisper.cpp) behind the `speech` feature,
+  shipped as a separate build. Model picked from RAM/cores (tiny/base/small,
+  multilingual, auto language), downloaded once from a pinned Hugging Face
+  revision (`5359861c…`) and verified by size + SHA-256. Microphone open only
+  while recording; result pasted via clipboard + synthetic Ctrl+V (SendInput /
+  XTEST). **Windows limitation:** whisper.cpp's CMake passes the MSVC-only
+  `/utf-8` flag to MinGW's g++, so the dictation build needs the MSVC
+  toolchain (CI's windows-latest); this machine has no admin rights to
+  install MSVC, so the Windows dictation build is CI-only.

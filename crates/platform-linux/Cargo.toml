@@ -6,12 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Linux (X11 primary, Wayland best-effort) backends for Perch"
 
-[dependencies]
-perch-core = { path = "../core" }
-anyhow.workspace = true
-log.workspace = true
-
 [target.'cfg(target_os = "linux")'.dependencies]
+log.workspace = true
+perch-core = { path = "../core" }
 zbus = { workspace = true }
 arboard.workspace = true
 libpulse-binding = { version = "2.30", default-features = false }
@@ -28,5 +25,5 @@ x11rb = { workspace = true, features = [
     "xkb",
 ] }
 
-[dev-dependencies]
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 perch-core = { path = "../core" }

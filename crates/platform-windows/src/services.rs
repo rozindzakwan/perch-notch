@@ -175,3 +175,58 @@ pub fn attach_parent_console() {
     // SAFETY: no pointers; failure (no parent console) is expected and ignored.
     let _ = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
 }
+
+/// Installed physical memory in bytes (0 if unknown).
+pub fn total_ram_bytes() -> u64 {
+    use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    let mut m = MEMORYSTATUSEX {
+        dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: `m` is a correctly sized out-param.
+    if unsafe { GlobalMemoryStatusEx(&mut m) }.is_ok() {
+        m.ullTotalPhys
+    } else {
+        0
+    }
+}
+
+/// Press Ctrl+V in the focused window (used after dictation).
+pub fn send_paste() -> Result<()> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+        VIRTUAL_KEY, VK_CONTROL,
+    };
+    let key = |vk: VIRTUAL_KEY, up: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: 0,
+                dwFlags: if up {
+                    KEYEVENTF_KEYUP
+                } else {
+                    KEYBD_EVENT_FLAGS(0)
+                },
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let v = VIRTUAL_KEY(u16::from(b'V'));
+    let inputs = [
+        key(VK_CONTROL, false),
+        key(v, false),
+        key(v, true),
+        key(VK_CONTROL, true),
+    ];
+    // SAFETY: a valid array of fully initialised keyboard inputs.
+    let sent = unsafe { SendInput(&inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent as usize == inputs.len() {
+        Ok(())
+    } else {
+        Err(Error::backend(
+            "SendInput was blocked (e.g. by an elevated window)",
+        ))
+    }
+}

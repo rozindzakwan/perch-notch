@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
 description = "Perch - a lightweight dynamic notch / island for Windows and Linux"
 default-run = "perch"
 
@@ -18,7 +20,6 @@ path = "src/main.rs"
 [dependencies]
 perch-core = { path = "../core" }
 perch-ui = { path = "../ui" }
-anyhow.workspace = true
 log.workspace = true
 env_logger.workspace = true
 notify.workspace = true
@@ -31,9 +32,22 @@ directories.workspace = true
 ureq = { workspace = true, optional = true }
 rusqlite = { workspace = true, optional = true }
 rodio = { workspace = true, optional = true }
+whisper-rs = { version = "0.16", optional = true }
+cpal = { version = "0.15", optional = true }
+sha2 = { version = "0.10", optional = true }
+nokhwa = { version = "0.10", optional = true, features = ["input-native"] }
 
 [features]
-default = ["media", "lyrics", "productivity", "clipboard", "white-noise", "screen-time"]
+default = [
+    "media",
+    "lyrics",
+    "productivity",
+    "clipboard",
+    "white-noise",
+    "screen-time",
+    "screenshot",
+    "camera",
+]
 # Optional features are compile-time gated as well as config-gated, so a build
 # without them does not contain their code at all.
 media = []
@@ -42,9 +56,10 @@ productivity = []
 screen-time = ["rusqlite"]
 clipboard = []
 white-noise = ["rodio"]
-speech = []
+speech = ["whisper-rs", "cpal", "sha2", "ureq"]
 screenshot = []
-camera = []
+camera = ["nokhwa"]
+# Everything, including the separately shipped dictation build.
 all-features = [
     "media",
     "lyrics",
@@ -52,6 +67,9 @@ all-features = [
     "screen-time",
     "clipboard",
     "white-noise",
+    "screenshot",
+    "camera",
+    "speech",
 ]
 
 [target.'cfg(windows)'.dependencies]
@@ -63,3 +81,4 @@ perch-platform-linux = { path = "../platform-linux" }
 
 [dev-dependencies]
 tempfile.workspace = true
+hound = "3.5"

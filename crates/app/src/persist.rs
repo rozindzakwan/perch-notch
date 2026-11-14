@@ -99,6 +99,8 @@ pub struct Status {
     pub lyric: String,
     /// Apps with recorded screen time today.
     pub usage_apps: usize,
+    /// The screenshot overlay is open.
+    pub shot_open: bool,
 }
 
 /// Write the status file if `$PERCH_STATUS_FILE` is set and it changed.

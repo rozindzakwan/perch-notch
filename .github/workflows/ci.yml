@@ -14,7 +14,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [x86_64-pc-windows-msvc, x86_64-pc-windows-gnu]
+        include:
+          - target: x86_64-pc-windows-msvc
+            features: --all-features
+          # whisper.cpp (dictation) needs MSVC; the GNU build covers everything else.
+          - target: x86_64-pc-windows-gnu
+            features: ""
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -29,15 +34,22 @@ jobs:
       - name: clippy (default features)
         run: cargo clippy --workspace --all-targets --locked --target ${{ matrix.target }} -- -D warnings
       - name: clippy (all features)
-        run: cargo clippy --workspace --all-targets --all-features --locked --target ${{ matrix.target }} -- -D warnings
+        run: cargo clippy --workspace --all-targets ${{ matrix.features }} --locked --target ${{ matrix.target }} -- -D warnings
       - name: test
-        run: cargo test --workspace --all-features --locked --target ${{ matrix.target }}
+        run: cargo test --workspace ${{ matrix.features }} --locked --target ${{ matrix.target }}
       - name: build release
         run: cargo build --release --locked -p perch --target ${{ matrix.target }}
       - name: UI smoke test (hover via SendInput)
         if: matrix.target == 'x86_64-pc-windows-msvc'
         shell: pwsh
         run: ./scripts/smoke-windows.ps1 -Exe target/${{ matrix.target }}/release/perch.exe -OutDir artifacts/windows
+      - name: build the dictation variant (perch-speech, whisper.cpp needs MSVC)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          cargo build --release --locked -p perch --features speech --target ${{ matrix.target }} --target-dir target/speech
+          Copy-Item target/speech/${{ matrix.target }}/release/perch.exe artifacts/perch-speech.exe -Force
       - name: SMTC end-to-end (mock player through the real media broker)
         if: matrix.target == 'x86_64-pc-windows-msvc'
         # Hosted runners may not run the media session broker; the result is
@@ -55,6 +67,7 @@ jobs:
           name: windows-${{ matrix.target }}
           path: |
             artifacts/windows
+            artifacts/perch-speech.exe
             target/${{ matrix.target }}/release/perch.exe
 
   linux:
@@ -76,7 +89,7 @@ jobs:
             xvfb openbox xdotool x11-utils x11-xserver-utils imagemagick xclip \
             dbus dbus-x11 playerctl picom sway pulseaudio pulseaudio-utils \
             sysstat procps psmisc file dpkg-dev fakeroot tesseract-ocr \
-            jq wmctrl x11-apps stalonetray
+            jq wmctrl x11-apps stalonetray espeak-ng
       - name: install cargo-deb
         run: cargo install --locked cargo-deb
       - name: linux-ci (check, test, build, smoke, mpris, pulse, wayland, deb)

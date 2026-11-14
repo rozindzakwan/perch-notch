@@ -117,3 +117,33 @@ pub fn utc_offset_seconds() -> i32 {
         .and_then(|b| perch_core::tz::offset_at(&b, now))
         .unwrap_or(0)
 }
+
+/// Press Ctrl+V in the focused window via XTEST (used after dictation).
+pub fn send_paste() -> Result<()> {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{KEY_PRESS_EVENT, KEY_RELEASE_EVENT};
+    use x11rb::protocol::xtest::ConnectionExt as _;
+    let (conn, screen) = crate::x11::connect()?;
+    let root = conn
+        .setup()
+        .roots
+        .get(screen)
+        .map(|s| s.root)
+        .ok_or_else(|| Error::backend("no such X screen"))?;
+    let ctrl = crate::x11_watch::keycode_for(&conn, 0xffe3)
+        .ok_or_else(|| Error::backend("no Control key"))?;
+    let v = crate::x11_watch::keycode_for(&conn, u32::from(b'v'))
+        .ok_or_else(|| Error::backend("no V key"))?;
+    for (kind, code) in [
+        (KEY_PRESS_EVENT, ctrl),
+        (KEY_PRESS_EVENT, v),
+        (KEY_RELEASE_EVENT, v),
+        (KEY_RELEASE_EVENT, ctrl),
+    ] {
+        conn.xtest_fake_input(kind, code, x11rb::CURRENT_TIME, root, 0, 0, 0)
+            .map_err(|e| Error::unavailable("paste", format!("XTEST: {e}")))?;
+    }
+    conn.flush()
+        .map_err(|e| Error::backend(format!("flush: {e}")))?;
+    Ok(())
+}

@@ -130,6 +130,8 @@ pub enum Effect {
     CameraToggle,
     /// Start/stop dictation.
     DictateToggle,
+    /// The push-to-talk key was released.
+    DictateRelease,
     /// Toggle the notch open/closed.
     ToggleNotch,
     /// Pin/unpin the notch open.
@@ -699,6 +701,10 @@ impl Model {
             "quit" | "exit" => vec![Effect::Quit],
             "shot" | "screenshot" => self.action(Action::Screenshot, now),
             "dictate" => self.action(Action::DictateToggle, now),
+            "dictate-release" if self.is_active(Feature::SpeechToText) => {
+                vec![Effect::DictateRelease]
+            }
+            "dictate-release" => Vec::new(),
             "camera" => self.action(Action::CameraToggle, now),
             "pomodoro" => self.action(Action::PomodoroToggle, now),
             "play-pause" => self.action(Action::Transport(TransportCommand::PlayPause), now),

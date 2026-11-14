@@ -39,5 +39,5 @@ WORKDIR /src
 
 # Smoke-test helpers (separate layer so the big apt layer above stays cached).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        jq wmctrl x11-apps stalonetray \
+        jq wmctrl x11-apps stalonetray espeak-ng \
     && rm -rf /var/lib/apt/lists/*

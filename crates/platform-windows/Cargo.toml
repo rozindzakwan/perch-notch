@@ -6,12 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Windows backends for Perch"
 
-[dependencies]
-perch-core = { path = "../core" }
-anyhow.workspace = true
-log.workspace = true
-
 [target.'cfg(windows)'.dependencies]
+log.workspace = true
+perch-core = { path = "../core" }
 arboard.workspace = true
 windows-core = "0.58"
 image = { workspace = true }
@@ -59,5 +56,5 @@ windows = { version = "0.58", features = [
     "Data_Xml_Dom",
 ] }
 
-[dev-dependencies]
+[target.'cfg(windows)'.dev-dependencies]
 perch-core = { path = "../core" }
