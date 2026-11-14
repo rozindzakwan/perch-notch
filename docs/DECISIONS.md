@@ -304,3 +304,37 @@ clipboard (`text/uri-list` via `arboard`), which file managers paste.
 - **Presets.** Spacemail (the user's company mail, confirmed from the
   domain's MX records and the server's IMAP greeting: Dovecot with IDLE and
   AUTH=PLAIN), Gmail, Yahoo, iCloud, Fastmail, Zoho, Other.
+
+## ADR-018: No acrylic blur behind the notch (yet)
+
+The Glass design has blur-aware alphas (surface 0.58 with blur, 0.88
+without). Before using them, a spike (`crates/ui/examples/blur_spike.rs`)
+tested the Windows 11 backdrop on the exact window Perch uses: a borderless,
+per-pixel-transparent winit + softbuffer window, with
+`DwmExtendFrameIntoClientArea(-1)` and
+`DWMWA_SYSTEMBACKDROP_TYPE = DWMSBT_TRANSIENTWINDOW`, drawing a translucent
+26 px rounded rectangle over an opaque checkerboard window of its own.
+Windows 11 25H2 (build 26200), 100 % scale. Captures in `docs/img/adr-018/`
+contain only the spike's two windows.
+
+| Check | Result |
+|---|---|
+| (a) blur behind translucent pixels | **Yes.** The checkerboard under the glass becomes a flat acrylic grey (pixel standard deviation 53.5 without the backdrop, 0 with it). |
+| (b) confined to the rounded shape | **No.** The backdrop fills the whole window rectangle, clipped only by DWM's own small corner radius. That leaves lighter acrylic wedges outside the 26 px corners, and DWM also paints a ghost caption-button glyph in the top-right corner. A `SetWindowRgn` rounded region removes the glyph and most of the wedge, but the region is 1-bit, so the edge is jagged. It would also have to be rebuilt on every frame of the spring animation, and it would cut off the shadow margin the panel draws around itself (without a region, acrylic fills that margin instead). |
+| (c) no idle CPU | **Yes.** 0 ms of CPU over 4 s idle in every mode. |
+
+**Decision.** Blur stays off on every platform: the palette always uses the
+no-blur alphas (`Palette::resolve(.., blur = false)`), and there is no
+`[appearance] blur` setting, since a switch that can't do anything would only
+confuse. `Frame.blur` and the blur alphas stay in place for when it becomes
+possible. Things that could change this:
+- a composition-based renderer (DirectComposition / Windows.UI.Composition),
+  where a `CompositionBackdropBrush` can be clipped to an anti-aliased
+  rounded geometry;
+- on Linux, compositor blur that honours a shape (KWin's
+  `_KDE_NET_WM_BLUR_BEHIND_REGION`, picom's `blur-background`), which only
+  some desktops offer, and not Cinnamon's Muffin.
+
+The settings window uses `apply_mica` (Mica backdrop on its title bar and a
+dark title bar in the dark theme). That works because it is an ordinary
+decorated window, where none of the problems above apply.
