@@ -1546,15 +1546,22 @@ impl ApplicationHandler<UserEvent> for Shell {
             self.reload_at = None;
             self.reload_config();
         }
+        // Animation advances at most once per frame. Window events can wake the
+        // loop far more often (on X11 every resize comes back as a
+        // ConfigureNotify), and stepping on each of them would turn an
+        // animation into a busy loop that feeds itself.
         let dt = now.saturating_duration_since(self.last_anim);
-        self.last_anim = now;
-        let was_moving = self.motion.next_deadline().is_some();
-        self.motion.step(dt);
-        let was = self.notch.state();
-        let needs_redraw = self.notch.advance(dt);
-        if needs_redraw || self.notch.state() != was || was_moving {
-            self.place();
-            self.request_redraw();
+        let animating = self.motion.next_deadline().is_some() || self.notch.wants_animation();
+        if !animating || dt >= FRAME_INTERVAL {
+            self.last_anim = now;
+            let was_moving = self.motion.next_deadline().is_some();
+            self.motion.step(dt);
+            let was = self.notch.state();
+            let needs_redraw = self.notch.advance(dt);
+            if needs_redraw || self.notch.state() != was || was_moving {
+                self.place();
+                self.request_redraw();
+            }
         }
         self.model
             .set_panel_state(self.expanded(), self.notch.is_visible(), Now::real());

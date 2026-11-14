@@ -5,49 +5,53 @@
 use std::time::Duration;
 
 /// Damping ratio: about 2.8 % overshoot on a 0 → 1 step (the spec allows 4 %).
-const ZETA: f32 = 0.75;
+const ZETA: f64 = 0.75;
 /// `ln(1000)`: the spring counts as settled within 0.1 % of its target.
-const SETTLE_LN: f32 = 6.907_755;
+const SETTLE_LN: f64 = 6.907_755;
 
 /// A critically under-damped spring driving one value toward a target.
+///
+/// Integrated in f64: an event flood can step it every few microseconds, and
+/// at f32 precision `velocity * dt` then vanishes against a value of a few
+/// hundred, so the value would freeze short of its target.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Spring {
-    value: f32,
-    velocity: f32,
-    target: f32,
+    value: f64,
+    velocity: f64,
+    target: f64,
 }
 
 impl Spring {
     /// A spring at rest at `value`.
     pub fn new(value: f32) -> Self {
         Self {
-            value,
+            value: f64::from(value),
             velocity: 0.0,
-            target: value,
+            target: f64::from(value),
         }
     }
 
     /// Aim at a new target (keeps the current value and velocity, so
     /// retargeting mid-flight is smooth).
     pub fn set_target(&mut self, target: f32) {
-        self.target = target;
+        self.target = f64::from(target);
     }
 
     /// Jump straight to `value` and stop.
     pub fn snap(&mut self, value: f32) {
-        self.value = value;
-        self.target = value;
+        self.value = f64::from(value);
+        self.target = f64::from(value);
         self.velocity = 0.0;
     }
 
     /// Current value.
     pub fn value(&self) -> f32 {
-        self.value
+        self.value as f32
     }
 
     /// Target value.
     pub fn target(&self) -> f32 {
-        self.target
+        self.target as f32
     }
 
     /// At rest on the target.
@@ -60,19 +64,19 @@ impl Spring {
     /// target.
     pub fn step(&mut self, dt: Duration, settle: Duration) -> bool {
         if self.settled() {
-            self.snap(self.target);
+            self.rest();
             return false;
         }
-        let secs = settle.as_secs_f32();
+        let secs = settle.as_secs_f64();
         if secs <= 0.0 {
-            self.snap(self.target);
+            self.rest();
             return false;
         }
         let omega = SETTLE_LN / (ZETA * secs);
         let k = omega * omega;
         let c = 2.0 * ZETA * omega;
         // Semi-implicit Euler in sub-steps of at most 2 ms for accuracy.
-        let mut left = dt.as_secs_f32();
+        let mut left = dt.as_secs_f64();
         while left > 0.0 {
             let h = left.min(0.002);
             let accel = -k * (self.value - self.target) - c * self.velocity;
@@ -81,10 +85,15 @@ impl Spring {
             left -= h;
         }
         if self.settled() {
-            self.snap(self.target);
+            self.rest();
             return false;
         }
         true
+    }
+
+    fn rest(&mut self) {
+        self.value = self.target;
+        self.velocity = 0.0;
     }
 }
 
@@ -98,6 +107,27 @@ pub fn ease_out(t: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn microsecond_steps_still_settle() {
+        // An event flood (X11 resize notifications) can step the spring every
+        // few microseconds; at f32 precision a value near 300 then stops
+        // moving while its velocity grows, and it never settles.
+        let mut s = Spring::new(200.0);
+        s.set_target(300.0);
+        let settle = Duration::from_millis(320);
+        let mut steps = 0u32;
+        while s.step(Duration::from_micros(20), settle) {
+            steps += 1;
+            assert!(steps < 200_000, "not settled after 4 s of 20 µs steps");
+        }
+        assert_eq!(s.value(), 300.0);
+        assert!(
+            steps < 30_000,
+            "settles in about 0.5 s of simulated time, took {} ms",
+            steps / 50
+        );
+    }
 
     #[test]
     fn a_step_overshoots_slightly_and_settles_on_time() {
