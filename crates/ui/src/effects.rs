@@ -30,11 +30,11 @@ struct ShadowMask {
     alpha: Vec<u8>,
 }
 
-/// Cache of shadow masks and glow clips.
+/// Cache of shadow masks and the panel glow.
 #[derive(Default)]
 pub struct Effects {
     shadows: Vec<ShadowMask>,
-    clips: Vec<(Key, Mask)>,
+    glow: Option<(GlowKey, Pixmap)>,
     misses: usize,
 }
 
@@ -235,34 +235,12 @@ impl Effects {
         }
     }
 
-    fn clip(&mut self, pw: u32, ph: u32, rect: (f32, f32, f32, f32), radius: f32) -> Option<usize> {
-        let key = Key {
-            w: pw,
-            h: ph,
-            r: radius.round() as u32,
-            // Pack the rect origin and size into the remaining field so a
-            // moved or resized surface gets its own clip.
-            blur: (rect.0.round() as u32) << 24
-                ^ (rect.1.round() as u32) << 16
-                ^ (rect.2.round() as u32) << 8
-                ^ rect.3.round() as u32,
-        };
-        if let Some(i) = self.clips.iter().position(|(k, _)| *k == key) {
-            return Some(i);
-        }
-        self.misses += 1;
-        let mut mask = Mask::new(pw, ph)?;
-        let path = rounded(rect.0, rect.1, rect.2, rect.3, radius)?;
-        mask.fill_path(&path, FillRule::Winding, true, Transform::identity());
-        if self.clips.len() >= CACHE {
-            self.clips.remove(0);
-        }
-        self.clips.push((key, mask));
-        Some(self.clips.len() - 1)
-    }
-
     /// Paint two soft colour blobs (top-left and bottom-right) inside the
     /// rounded rect, for the album-colour tint behind a panel's content.
+    ///
+    /// The result is cached as a rect-sized pixmap keyed by geometry and
+    /// colours, so a settled panel only blits it (radial gradients through
+    /// a mask cost ~9 ms per frame at 2x).
     pub fn glow(
         &mut self,
         pm: &mut Pixmap,
@@ -271,52 +249,93 @@ impl Effects {
         colors: (Color, Color),
     ) {
         let (x, y, w, h) = rect;
-        if w < 1.0 || h < 1.0 {
+        if w < 1.0 || h < 1.0 || !(x.is_finite() && y.is_finite()) {
             return;
         }
-        let Some(ci) = self.clip(pm.width(), pm.height(), rect, radius) else {
-            return;
+        let (x0, y0) = (x.floor(), y.floor());
+        let key = GlowKey {
+            rect: [x, y, w, h, radius].map(f32::to_bits),
+            colors: [colors.0, colors.1].map(|c| {
+                let c = c.to_color_u8();
+                u32::from_be_bytes([c.red(), c.green(), c.blue(), c.alpha()])
+            }),
         };
-        let blobs = [
-            (x + w * 0.15, y + h * 0.2, w.max(h) * 0.65, colors.0, 0.45),
-            (x + w * 0.9, y + h * 0.9, w.max(h) * 0.7, colors.1, 0.35),
-        ];
-        for (cx, cy, r, c, a) in blobs {
-            let mut inner = c;
-            inner.apply_opacity(a);
-            let mut outer = c;
-            outer.set_alpha(0.0);
-            let Some(shader) = RadialGradient::new(
-                Point::from_xy(cx, cy),
-                Point::from_xy(cx, cy),
-                r,
-                vec![GradientStop::new(0.0, inner), GradientStop::new(1.0, outer)],
-                SpreadMode::Pad,
+        if self.glow.as_ref().map(|g| g.0) != Some(key) {
+            self.misses += 1;
+            let Some(img) = render_glow(rect, (x0, y0), radius, colors) else {
+                return;
+            };
+            self.glow = Some((key, img));
+        }
+        if let Some((_, img)) = &self.glow {
+            pm.draw_pixmap(
+                x0 as i32,
+                y0 as i32,
+                img.as_ref(),
+                &tiny_skia::PixmapPaint::default(),
                 Transform::identity(),
-            ) else {
-                continue;
-            };
-            let paint = Paint {
-                shader,
-                anti_alias: true,
-                ..Default::default()
-            };
-            let mut pb = PathBuilder::new();
-            pb.push_rect(match tiny_skia::Rect::from_xywh(x, y, w, h) {
-                Some(r) => r,
-                None => continue,
-            });
-            if let (Some(path), Some((_, mask))) = (pb.finish(), self.clips.get(ci)) {
-                pm.fill_path(
-                    &path,
-                    &paint,
-                    FillRule::Winding,
-                    Transform::identity(),
-                    Some(mask),
-                );
-            }
+                None,
+            );
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GlowKey {
+    rect: [u32; 5],
+    colors: [u32; 2],
+}
+
+/// The glow for `rect`, drawn into a pixmap whose top-left is `origin`.
+fn render_glow(
+    (x, y, w, h): (f32, f32, f32, f32),
+    (x0, y0): (f32, f32),
+    radius: f32,
+    colors: (Color, Color),
+) -> Option<Pixmap> {
+    let (lx, ly) = (x - x0, y - y0);
+    let mut img = Pixmap::new((lx + w).ceil() as u32, (ly + h).ceil() as u32)?;
+    let mut mask = Mask::new(img.width(), img.height())?;
+    mask.fill_path(
+        &rounded(lx, ly, w, h, radius)?,
+        FillRule::Winding,
+        true,
+        Transform::identity(),
+    );
+    let blobs = [
+        (lx + w * 0.15, ly + h * 0.2, w.max(h) * 0.65, colors.0, 0.45),
+        (lx + w * 0.9, ly + h * 0.9, w.max(h) * 0.7, colors.1, 0.35),
+    ];
+    let path = PathBuilder::from_rect(tiny_skia::Rect::from_xywh(lx, ly, w, h)?);
+    for (cx, cy, r, c, a) in blobs {
+        let mut inner = c;
+        inner.apply_opacity(a);
+        let mut outer = c;
+        outer.set_alpha(0.0);
+        let Some(shader) = RadialGradient::new(
+            Point::from_xy(cx, cy),
+            Point::from_xy(cx, cy),
+            r,
+            vec![GradientStop::new(0.0, inner), GradientStop::new(1.0, outer)],
+            SpreadMode::Pad,
+            Transform::identity(),
+        ) else {
+            continue;
+        };
+        let paint = Paint {
+            shader,
+            anti_alias: true,
+            ..Default::default()
+        };
+        img.fill_path(
+            &path,
+            &paint,
+            FillRule::Winding,
+            Transform::identity(),
+            Some(&mask),
+        );
+    }
+    Some(img)
 }
 
 #[cfg(test)]
@@ -327,6 +346,25 @@ mod tests {
 
     fn alpha(pm: &Pixmap, x: u32, y: u32) -> u8 {
         pm.pixel(x, y).map(|p| p.alpha()).unwrap_or(0)
+    }
+
+    #[test]
+    fn glow_is_cached_while_settled_and_stays_inside_the_shape() {
+        let mut fx = Effects::default();
+        let mut pm = Pixmap::new(200, 160).unwrap_or_else(|| panic!("pixmap"));
+        let colors = (
+            Color::from_rgba8(255, 122, 89, 255),
+            Color::from_rgba8(196, 49, 122, 255),
+        );
+        let rect = (10.0, 10.0, 180.0, 140.0);
+        fx.glow(&mut pm, rect, 26.0, colors);
+        let first = fx.cache_misses();
+        fx.glow(&mut pm, rect, 26.0, colors);
+        assert_eq!(fx.cache_misses(), first, "same panel: reused");
+        fx.glow(&mut pm, (10.0, 10.0, 180.0, 150.0), 26.0, colors);
+        assert_eq!(fx.cache_misses(), first + 1, "resized: rebuilt");
+        assert!(alpha(&pm, 40, 40) > 0, "tinted inside");
+        assert_eq!(alpha(&pm, 11, 11), 0, "nothing outside the rounded corner");
     }
 
     #[test]
