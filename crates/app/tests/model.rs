@@ -1143,3 +1143,70 @@ fn today_is_the_first_tab_and_the_idle_pill_shows_the_time() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn mail_has_a_tab_per_account_plus_all() {
+    use perch_core::config::MailAccount;
+    use perch_core::mail::{MailItem, MailUpdate};
+    let now = t0();
+    let mut cfg = config_all();
+    cfg.features.mail = true;
+    for name in ["Work", "Gmail"] {
+        cfg.mail.accounts.push(MailAccount {
+            name: name.into(),
+            username: format!("{}@example.com", name.to_lowercase()),
+            host: "mail.example.com".into(),
+            ..MailAccount::default()
+        });
+    }
+    let mut m = Model::new(cfg, now);
+    let item = |uid: u32, from: &str, age: u64| MailItem {
+        uid,
+        from: from.into(),
+        subject: format!("from {from}"),
+        date_unix: Some(now.unix - age),
+    };
+    m.mail_update(MailUpdate::Snapshot {
+        account: "Work".into(),
+        uid_validity: 1,
+        unread: 2,
+        items: vec![item(1, "Ann", 60), item(2, "Bob", 600)],
+    });
+    m.mail_update(MailUpdate::Snapshot {
+        account: "Gmail".into(),
+        uid_validity: 1,
+        unread: 1,
+        items: vec![item(9, "Cara", 120)],
+    });
+    m.action(Action::SelectTab(Tab::Mail), now);
+    let senders = |m: &mut Model| match m.view(now).body {
+        Body::List { rows, filters, .. } => (
+            rows.iter().map(|r| r.text.clone()).collect::<Vec<_>>(),
+            filters
+                .iter()
+                .map(|f| (f.label.clone(), f.count, f.selected))
+                .collect::<Vec<_>>(),
+        ),
+        other => panic!("{other:?}"),
+    };
+    let (rows, filters) = senders(&mut m);
+    assert_eq!(
+        rows,
+        ["Ann", "Cara", "Bob"],
+        "All: every account, newest first"
+    );
+    assert_eq!(
+        filters,
+        [
+            ("All".to_string(), 3, true),
+            ("Work".to_string(), 2, false),
+            ("Gmail".to_string(), 1, false)
+        ]
+    );
+    m.action(Action::MailFilter(Some("Gmail".into())), now);
+    let (rows, filters) = senders(&mut m);
+    assert_eq!(rows, ["Cara"], "only Gmail");
+    assert!(filters[2].2, "Gmail selected");
+    m.action(Action::MailFilter(None), now);
+    assert_eq!(senders(&mut m).0.len(), 3);
+}

@@ -155,6 +155,8 @@ pub struct Model {
     features: ActiveFeatures,
     tab: Option<Tab>,
     scroll: usize,
+    /// The mail account tab picked (`None` = all accounts).
+    mail_filter: Option<String>,
 
     media: MediaState,
     media_reported_at: Instant,
@@ -213,6 +215,7 @@ impl Model {
             features,
             tab: None,
             scroll: 0,
+            mail_filter: None,
             media: MediaState::new(),
             media_reported_at: now.instant,
             seek_preview: None,
@@ -1102,6 +1105,11 @@ impl Model {
                 }
                 redraw
             }
+            Action::MailFilter(account) => {
+                self.mail_filter = account;
+                self.scroll = 0;
+                redraw
+            }
             Action::Scroll(d) => {
                 let max = self.list_len().saturating_sub(1);
                 let s = self.scroll as i64 + i64::from(d);
@@ -1246,9 +1254,54 @@ impl Model {
             Some(Tab::Shelf) => self.shelf.len(),
             Some(Tab::Tasks) => self.todos.len(),
             Some(Tab::Mixer) => self.sessions.len(),
-            Some(Tab::Mail) => self.mail.items().len(),
+            Some(Tab::Mail) => self.mail_items().len(),
             _ => 0,
         }
+    }
+
+    /// The account the mail tab shows, if one is picked and still exists.
+    fn mail_account(&self) -> Option<&str> {
+        let name = self.mail_filter.as_deref()?;
+        self.mail
+            .accounts()
+            .iter()
+            .any(|a| a.name == name)
+            .then_some(name)
+    }
+
+    /// Unread mail for the picked account tab (all accounts by default),
+    /// newest first.
+    fn mail_items(&self) -> Vec<(&str, &perch_core::mail::MailItem)> {
+        let only = self.mail_account();
+        let mut items = self.mail.items();
+        if let Some(name) = only {
+            items.retain(|(acct, _)| *acct == name);
+        }
+        items
+    }
+
+    /// The tabs above the mail list: "All" plus one per account. None with a
+    /// single account (the tabs would say nothing new).
+    fn mail_filters(&self) -> Vec<perch_core::view::ListFilter> {
+        use perch_core::view::ListFilter;
+        let accounts = self.mail.accounts();
+        if accounts.len() < 2 {
+            return Vec::new();
+        }
+        let only = self.mail_account();
+        let mut out = vec![ListFilter {
+            label: "All".into(),
+            count: self.mail.total_unread(),
+            selected: only.is_none(),
+            action: Action::MailFilter(None),
+        }];
+        out.extend(accounts.iter().map(|a| ListFilter {
+            label: a.name.clone(),
+            count: a.unread,
+            selected: only == Some(a.name.as_str()),
+            action: Action::MailFilter(Some(a.name.clone())),
+        }));
+        out
     }
 
     /// What the collapsed pill shows: a message wins; otherwise the running
@@ -1306,7 +1359,7 @@ impl Model {
             Some(Tab::Tasks) => 80 + rows(self.todos.len() + 1, ROW1),
             Some(Tab::Clipboard) => 28 + rows(self.clipboard.len(), ROW2),
             Some(Tab::Shelf) => 28 + rows(self.shelf.len(), ROW2),
-            Some(Tab::Mail) => 28 + rows(self.mail.items().len() + self.mail_problems(), ROW2),
+            Some(Tab::Mail) => 28 + rows(self.mail_items().len() + self.mail_problems(), ROW2),
             Some(Tab::Mixer) => rows(self.sessions.len(), 38.0),
             Some(Tab::Sounds) => rows(NoiseKind::ALL.len(), 38.0),
             Some(Tab::Time) => 140,
@@ -1384,6 +1437,7 @@ impl Model {
                     empty: "Copy something and it shows up here.".into(),
                     header: (!self.clipboard.is_empty())
                         .then(|| ("Clear".into(), Action::ClipClear)),
+                    filters: Vec::new(),
                 },
                 Some(Tab::Shelf) => Body::List {
                     rows: self
@@ -1413,6 +1467,7 @@ impl Model {
                         .collect(),
                     empty: "Drop files here to park them.".into(),
                     header: (!self.shelf.is_empty()).then(|| ("Clear".into(), Action::ShelfClear)),
+                    filters: Vec::new(),
                 },
                 Some(Tab::Mixer) => Body::Sliders {
                     rows: self
@@ -1481,6 +1536,7 @@ impl Model {
                         .accounts()
                         .iter()
                         .filter(|a| a.status.is_problem())
+                        .filter(|a| self.mail_account().is_none_or(|n| n == a.name))
                         .map(|a| Row {
                             text: format!("{}: {}", a.name, a.status.label()),
                             detail: String::new(),
@@ -1493,8 +1549,9 @@ impl Model {
                             chip: None,
                         })
                         .collect();
-                    let several = self.mail.accounts().len() > 1;
-                    rows.extend(self.mail.items().into_iter().skip(self.scroll).map(
+                    // The account name only helps on the "All" tab.
+                    let several = self.mail.accounts().len() > 1 && self.mail_account().is_none();
+                    rows.extend(self.mail_items().into_iter().skip(self.scroll).map(
                         |(acct, m)| Row {
                             text: m.from.clone(),
                             detail: match (m.date_unix, several) {
@@ -1530,6 +1587,7 @@ impl Model {
                             "No unread mail.".into()
                         },
                         header: Some(("Accounts".into(), Action::OpenSettings)),
+                        filters: self.mail_filters(),
                     }
                 }
                 Some(Tab::Tools) => {

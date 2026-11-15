@@ -115,8 +115,10 @@ pub enum Action {
     DictateToggle,
     /// Open the settings window.
     OpenSettings,
-    /// Pin/unpin the notch open.
+    /// The lock: keep the pill (no stripe) over fullscreen apps.
     PinToggle,
+    /// Show one mail account (`None` = all accounts).
+    MailFilter(Option<String>),
     /// The banner was clicked: open the panel on its tab.
     BannerOpen,
 }
@@ -187,6 +189,19 @@ pub enum CollapsedView {
     },
     /// A transient message (reminder, notification fallback).
     Message(String),
+}
+
+/// One tab above a list (e.g. a mail account), with its count.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListFilter {
+    /// "All", "Work".
+    pub label: String,
+    /// Unread / item count shown next to it.
+    pub count: u32,
+    /// The current one.
+    pub selected: bool,
+    /// What a click does.
+    pub action: Action,
 }
 
 /// Today tab contents.
@@ -412,6 +427,8 @@ pub enum Body {
         empty: String,
         /// Header button label + action (e.g. "Clear").
         header: Option<(String, Action)>,
+        /// Tabs above the list (mail accounts); empty for none.
+        filters: Vec<ListFilter>,
     },
     /// Sliders (mixer, sounds).
     Sliders {

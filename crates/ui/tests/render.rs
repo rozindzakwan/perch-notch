@@ -64,6 +64,7 @@ fn bodies() -> Vec<Body> {
             rows: vec![],
             empty: "Nothing here".into(),
             header: None,
+            filters: vec![],
         },
         Body::Sliders {
             rows: vec![SliderRow {
@@ -473,6 +474,7 @@ fn list_render(
             rows,
             empty: "No unread mail.".into(),
             header: Some(("Accounts".into(), Action::OpenSettings)),
+            filters: vec![],
         },
         pinned: false,
         banner: None,
@@ -484,6 +486,51 @@ fn list_render(
     frame.progress = 1.0;
     frame.cursor = cursor;
     r.draw(&mut pm, &frame, &view)
+}
+
+#[test]
+fn mail_account_tabs_are_buttons_above_the_list() {
+    let filters: Vec<perch_core::view::ListFilter> = [None, Some("Work"), Some("Gmail")]
+        .into_iter()
+        .map(|acct| perch_core::view::ListFilter {
+            label: acct.unwrap_or("All").into(),
+            count: 2,
+            selected: acct.is_none(),
+            action: Action::MailFilter(acct.map(Into::into)),
+        })
+        .collect();
+    let view = PanelView {
+        collapsed: CollapsedView::Idle,
+        tabs: vec![Tab::Mail],
+        tab: Some(Tab::Mail),
+        body: Body::List {
+            rows: vec![mail_row("Ann", "Hi")],
+            empty: String::new(),
+            header: Some(("Accounts".into(), Action::OpenSettings)),
+            filters,
+        },
+        pinned: false,
+        banner: None,
+    };
+    let mut r = Renderer::new().unwrap_or_else(|e| panic!("{e}"));
+    let mut pm = Pixmap::new(380, 300).unwrap_or_else(|| panic!("pixmap"));
+    let mut frame = Frame::new(380, 300, 1.0, Palette::dark(false));
+    frame.progress = 1.0;
+    let hits = r.draw(&mut pm, &frame, &view);
+    let find = |a: Action| {
+        hits.iter()
+            .find(|h| h.kind == perch_core::view::HitKind::Button(a.clone()))
+            .cloned()
+            .unwrap_or_else(|| panic!("no tab for {a:?}"))
+    };
+    let all = find(Action::MailFilter(None));
+    let work = find(Action::MailFilter(Some("Work".into())));
+    let gmail = find(Action::MailFilter(Some("Gmail".into())));
+    let row = find(Action::TodoAdd);
+    assert!(all.x < work.x && work.x < gmail.x, "left to right");
+    assert!(all.y + all.h <= row.y, "tabs sit above the rows");
+    let accounts = find(Action::OpenSettings);
+    assert!(gmail.x + gmail.w <= accounts.x, "tabs stop before the chip");
 }
 
 fn mail_row(sender: &str, subject: &str) -> Row {
@@ -630,6 +677,7 @@ fn every_body_renders_in_light_and_dark_with_empty_data() {
                 rows: Vec::new(),
                 empty: "No unread mail.".into(),
                 header: None,
+                filters: vec![],
             },
         ),
         (

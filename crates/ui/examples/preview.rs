@@ -110,6 +110,19 @@ fn panels() -> Vec<(&'static str, Tab, Body)> {
                 ],
                 empty: "No unread mail.".into(),
                 header: Some(("Accounts".into(), Action::OpenSettings)),
+                filters: [
+                    ("All", 3, None),
+                    ("Work", 2, Some("Work")),
+                    ("Gmail", 1, Some("Gmail")),
+                ]
+                .into_iter()
+                .map(|(label, count, acct)| perch_core::view::ListFilter {
+                    label: label.into(),
+                    count,
+                    selected: acct.is_none(),
+                    action: Action::MailFilter(acct.map(Into::into)),
+                })
+                .collect(),
             },
         ),
         (

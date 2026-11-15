@@ -454,7 +454,8 @@ fn draw_panel(ctx: &mut Ctx<'_>, view: &PanelView, panel: (f32, f32, f32, f32), 
             rows,
             empty,
             header,
-        } => list(ctx, rows, empty, header.as_ref(), body),
+            filters,
+        } => list(ctx, rows, empty, header.as_ref(), filters, body),
         Body::Sliders { rows, empty } => sliders(ctx, rows, empty, body),
         Body::Usage { total, bars } => usage(ctx, total, bars, body),
         Body::Buttons(items) => buttons(ctx, items, body),
@@ -826,11 +827,55 @@ fn leading_of(l: &perch_core::view::RowLeading) -> glass::Leading {
 
 /// A list body: "N items" + header chip, then rows (two lines when they
 /// have a subtitle), or the empty text.
+/// A row of pill tabs ("All 3", "Work 2") above a list; the selected one is
+/// filled. Each is a button with its own action.
+fn filter_pills(
+    ctx: &mut Ctx<'_>,
+    filters: &[perch_core::view::ListFilter],
+    x: f32,
+    y: f32,
+    max_w: f32,
+    h: f32,
+) {
+    let s = ctx.s;
+    let pad = 10.0 * s;
+    let gap = 6.0 * s;
+    let mut px = x;
+    for f in filters {
+        let label = if f.count > 0 {
+            format!("{} {}", f.label, f.count)
+        } else {
+            f.label.clone()
+        };
+        let tw = ctx.measure(&label, text::CAPTION);
+        let pw = tw + 2.0 * pad;
+        if px + pw > x + max_w {
+            break;
+        }
+        let rect = (px, y, pw, h);
+        let (bg, fg) = if f.selected {
+            (ctx.pal.raised[2], ctx.pal.fg)
+        } else if ctx.hovered(rect) {
+            (ctx.hover_fill(ctx.pal.raised[1]), ctx.pal.fg)
+        } else {
+            (
+                ctx.pal.raised[0],
+                ctx.fade(ctx.pal.fg, crate::tokens::SECONDARY_ALPHA),
+            )
+        };
+        ctx.rrect(rect, h / 2.0, bg);
+        ctx.text(&label, px + pad, y, h, text::CAPTION, fg, tw + 1.0);
+        ctx.button(rect, f.action.clone());
+        px += pw + gap;
+    }
+}
+
 fn list(
     ctx: &mut Ctx<'_>,
     rows: &[Row],
     empty: &str,
     header: Option<&(String, Action)>,
+    filters: &[perch_core::view::ListFilter],
     (x, y, w, h): (f32, f32, f32, f32),
 ) {
     let s = ctx.s;
@@ -843,7 +888,11 @@ fn list(
             rows.len(),
             if rows.len() == 1 { "" } else { "s" }
         );
-        ctx.text(&count, x, top, hh, text::CAPTION, muted, w / 2.0);
+        if filters.is_empty() {
+            ctx.text(&count, x, top, hh, text::CAPTION, muted, w / 2.0);
+        } else {
+            filter_pills(ctx, filters, x, top, w - 90.0 * s, hh);
+        }
         glass::chip(ctx, x + w, top, label, action.clone());
         top += hh + 6.0 * s;
     }
