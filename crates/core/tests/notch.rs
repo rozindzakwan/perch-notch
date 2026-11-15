@@ -191,16 +191,16 @@ fn an_obscuring_app_shrinks_the_notch_to_a_stripe_and_restores_it() {
 }
 
 #[test]
-fn hovering_the_stripe_opens_the_notch_only_after_three_seconds() {
+fn hovering_the_stripe_opens_the_notch_only_after_two_seconds() {
     let mut n = notch();
     n.handle(NotchEvent::ObscuredChanged(true));
     n.handle(NotchEvent::HotZoneEntered);
     assert_eq!(
         n.next_deadline(),
-        Some(Duration::from_secs(3)),
+        Some(Duration::from_secs(2)),
         "wakes once, for the reveal"
     );
-    n.advance(Duration::from_millis(2_900));
+    n.advance(Duration::from_millis(1_900));
     assert_eq!(
         n.state(),
         NotchState::Collapsed,
@@ -209,7 +209,7 @@ fn hovering_the_stripe_opens_the_notch_only_after_three_seconds() {
     assert!(n.is_stripe());
     n.advance(Duration::from_millis(200));
     open_fully(&mut n);
-    assert_eq!(n.state(), NotchState::Expanded, "3 s of hovering opens it");
+    assert_eq!(n.state(), NotchState::Expanded, "2 s of hovering opens it");
     assert!(!n.is_stripe());
     // Leaving closes it back down to the stripe.
     n.handle(NotchEvent::HotZoneLeft);
@@ -221,18 +221,18 @@ fn hovering_the_stripe_opens_the_notch_only_after_three_seconds() {
 }
 
 #[test]
-fn leaving_the_stripe_before_three_seconds_cancels_the_reveal() {
+fn leaving_the_stripe_before_two_seconds_cancels_the_reveal() {
     let mut n = notch();
     n.handle(NotchEvent::ObscuredChanged(true));
     n.handle(NotchEvent::HotZoneEntered);
-    n.advance(Duration::from_secs(2));
+    n.advance(Duration::from_millis(1_500));
     n.handle(NotchEvent::HotZoneLeft);
     assert_eq!(n.next_deadline(), None);
     n.advance(Duration::from_secs(5));
     assert_eq!(n.state(), NotchState::Collapsed);
-    // A new hover starts the full 3 s again.
+    // A new hover starts the full 2 s again.
     n.handle(NotchEvent::PointerEntered);
-    n.advance(Duration::from_secs(2));
+    n.advance(Duration::from_millis(1_500));
     assert_eq!(n.state(), NotchState::Collapsed);
 }
 

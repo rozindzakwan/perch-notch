@@ -62,7 +62,7 @@ talks to the running instance.
 
 **Stays out of the way.** While a fullscreen app (a game, a video, F11) or a
 maximized window is in front, the notch shrinks to a thin stripe at the top
-of the screen. Rest the pointer on the stripe for three seconds to open it;
+of the screen. Rest the pointer on the stripe for two seconds to open it;
 move away and it shrinks back. The hotkey still opens it at once, and
 notifications wait until the app is no longer in front.
 
@@ -98,7 +98,7 @@ How each claim was checked:
 | Pill + hover expand/collapse, no focus stealing | verified on Windows (11; 10 untested) | CI-verified (container) | CI-verified (openbox), others untested | not implemented |
 | Always on top, not in taskbar/Alt-Tab | verified on Windows | CI-verified (dock + ABOVE/STICKY/SKIP_*, survives a WM restart) | same | — |
 | Transparent rounded pill | verified on Windows | rendered with picom (ARGB) and without a compositor (XShape); screenshots only, no automated pixel check | same | — |
-| Stripe over fullscreen and maximized apps, 3 s hover to open | verified on Windows | CI-verified (EWMH fullscreen and maximized) | same | — |
+| Stripe over fullscreen and maximized apps, 2 s hover to open | verified on Windows | CI-verified (EWMH fullscreen and maximized) | same | — |
 | Tray icon | verified on Windows | implemented, untested on Cinnamon (`xapp-sn-watcher`); XEmbed fallback CI-verified to start | implemented, untested | — |
 | CLI → running instance | verified on Windows (named pipe) | CI-verified (Unix socket) | same | — |
 | Global hotkeys | verified on Windows (RegisterHotKey) | CI-verified (XGrabKey) | same | not implemented |
@@ -219,7 +219,7 @@ save it:
 position = "top-center"    # also top-left, top-right, bottom-*, left/right-center
 monitor = 0                # omit for the primary monitor
 hide_on_fullscreen = true  # shrink to a stripe over fullscreen and maximized apps
-reveal_delay_ms = 3000     # hover the stripe this long to open the notch
+reveal_delay_ms = 2000     # hover the stripe this long to open the notch
 collapse_delay_ms = 220
 
 [features]

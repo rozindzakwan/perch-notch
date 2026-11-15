@@ -74,7 +74,7 @@ leaving collapses back; CLI `toggle-notch` pins open and closes; CLI `todo`;
 < 300 ms (**85 ms**); clipboard records a normal copy, **skips a copy marked
 `ExcludeClipboardContentFromMonitorProcessing`**, then records the next one; a
 fullscreen window turns the notch into a **thin stripe** (≤ 8 px), which stays
-shut after 1.5 s of hovering and **opens after 3 s**, then shrinks back when
+shut after 1 s of hovering and **opens after 2 s**, then shrinks back when
 the pointer leaves; a maximized window makes a stripe too; closing either
 restores the pill; screen time records the foreground app; the screenshot overlay opens, copies an image
 and closes; Perch **never takes the foreground**; idle private bytes
@@ -158,7 +158,7 @@ end to end** (mock player → D-Bus → Perch, paused with `playerctl`, resumed
 with `perch play-pause`); clipboard records `xclip` copies and **skips a
 KeePassXC-style `x-kde-passwordManagerHint` owner**; the screenshot overlay
 opens, a dragged region is copied as `image/png`; EWMH fullscreen and maximized windows turn the notch into a stripe that opens
-only after a 3 s hover, and restoring them brings the pill back; screen time records apps; **`openbox --replace` (a WM
+only after a 2 s hover, and restoring them brings the pill back; screen time records apps; **`openbox --replace` (a WM
 restart) keeps `_NET_WM_STATE_ABOVE`**; idle RSS < 40 MB and 0 CPU ticks in
 10 s; `perch quit` exits cleanly.
 

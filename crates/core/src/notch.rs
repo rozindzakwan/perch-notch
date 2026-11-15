@@ -11,7 +11,7 @@ use std::time::Duration;
 use crate::anim::{ease_out, Spring};
 
 /// How long the pointer must rest on the stripe before the notch opens.
-pub const DEFAULT_REVEAL_DELAY: Duration = Duration::from_secs(3);
+pub const DEFAULT_REVEAL_DELAY: Duration = Duration::from_secs(2);
 /// How long the content takes to fade in once the panel is 40 % open.
 const CONTENT_FADE: Duration = Duration::from_millis(140);
 /// Content starts to appear at this open-ness.

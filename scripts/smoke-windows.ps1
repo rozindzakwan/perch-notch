@@ -388,14 +388,14 @@ try {
         Start-Sleep -Milliseconds 500
         $r = Get-LiveRect $pillHandle
         Check 'fullscreen_stripes' ($st.stripe -eq $true -and $st.visible -eq $true -and $r.H -le 8) "stripe=$($st.stripe), $($r.W)x$($r.H)"
-        # ...that opens only after the pointer rests on it for 3 s.
+        # ...that opens only after the pointer rests on it for 2 s.
         Move-MouseAbsolute ([int]($screen.Width/2)) 0
-        for ($i = 0; $i -lt 15; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+        for ($i = 0; $i -lt 10; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
         $st = Read-Status
-        Check 'stripe_hover_waits' ($st.state -eq 'Collapsed') "state after 1.5 s: $($st.state)"
-        for ($i = 0; $i -lt 23; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+        Check 'stripe_hover_waits' ($st.state -eq 'Collapsed') "state after 1.0 s: $($st.state)"
+        for ($i = 0; $i -lt 18; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
         $st = Read-Status
-        Check 'stripe_hover_reveals' ($st.state -eq 'Expanded') "state after 3.8 s: $($st.state)"
+        Check 'stripe_hover_reveals' ($st.state -eq 'Expanded') "state after 2.8 s: $($st.state)"
         Move-MouseAbsolute $parkX $parkY
         for ($i = 0; $i -lt 12; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
         $st = Read-Status

@@ -76,7 +76,7 @@ impl Default for NotchConfig {
             hot_zone_padding: 40,
             collapse_delay_ms: 220,
             hide_on_fullscreen: true,
-            reveal_delay_ms: 3000,
+            reveal_delay_ms: 2000,
             corner_radius: None,
         }
     }
