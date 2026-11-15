@@ -9,6 +9,8 @@
 #     with RFC 2047 subjects decoded
 #   - a newly delivered message is pushed (IMAP IDLE) within seconds
 #   - nothing was marked as read on the server (read-only guarantee)
+#   - with the opt-in mark-as-read, exactly one message becomes Seen (nothing
+#     else changes) and Perch's read-only sessions follow it through IDLE
 #   - a wrong password shows "sign-in failed" and is not retried
 #   - removing the feature stops the sessions
 # Writes mail-test.txt (and a cropped screenshot of the Mail tab) to --out.
@@ -204,6 +206,27 @@ SEEN=$( (doveadm -c "$M/dovecot.conf" search -u test@example.com mailbox INBOX S
 TOTAL=$( (doveadm -c "$M/dovecot.conf" search -u test@example.com mailbox INBOX ALL 2>>"$M/doveadm.err" || true) | wc -l)
 [ -s "$M/doveadm.err" ] && info "doveadm: $(head -c 300 "$M/doveadm.err")"
 check nothing_marked_read "$([ "$SEEN" = 0 ] && [ "$TOTAL" = 3 ] && echo 1 || echo 0)" "$SEEN of $TOTAL messages are \\Seen on the server"
+
+# Opt-in "mark as read" ([mail] allow_mark_read): one message, over its own
+# connection; the read-only watchers see it through IDLE.
+UNREAD_BEFORE=$(STATUS .mail_unread)
+if PERCH_TEST_IMAP_USER=test@example.com PERCH_TEST_IMAP_PORT=1993 \
+    PERCH_TEST_IMAP_CA="$M/ca.pem" PERCH_TEST_IMAP_PASSWORD="correct horse" \
+    cargo test -q -p perch --features mail --locked --test mail_client \
+        -- --ignored --exact marks_one_message_read_on_a_real_server --nocapture >>"$M/mark.log" 2>&1; then
+    MARK_OK=1
+else
+    MARK_OK=0
+fi
+check mark_read_on_dovecot "$MARK_OK" "$(grep -m1 -E 'marked uid|panicked|error' "$M/mark.log" || tail -n 3 "$M/mark.log" | tr '\n' ' ')"
+SEEN=$( (doveadm -c "$M/dovecot.conf" search -u test@example.com mailbox INBOX SEEN 2>/dev/null || true) | wc -l)
+check mark_read_sets_only_one "$([ "$SEEN" = 1 ] && echo 1 || echo 0)" "$SEEN of $TOTAL messages are \\Seen on the server"
+DELETED=$( (doveadm -c "$M/dovecot.conf" search -u test@example.com mailbox INBOX DELETED 2>/dev/null || true) | wc -l)
+TOTAL_NOW=$( (doveadm -c "$M/dovecot.conf" search -u test@example.com mailbox INBOX ALL 2>/dev/null || true) | wc -l)
+check mark_read_changes_nothing_else "$([ "$DELETED" = 0 ] && [ "$TOTAL_NOW" = "$TOTAL" ] && echo 1 || echo 0)" "$TOTAL_NOW messages, $DELETED marked deleted"
+# Perch's own sessions (both accounts read this mailbox) follow within seconds.
+until_status '.mail_unread' "$((UNREAD_BEFORE - 2))" 15 || true
+check perch_follows_the_mark "$([ "$(STATUS .mail_unread)" = "$((UNREAD_BEFORE - 2))" ] && echo 1 || echo 0)" "mail_unread $UNREAD_BEFORE -> $(STATUS .mail_unread)"
 
 # Wrong password: reported, not retried.
 echo "wrong" | "$BIN" --config "$M/config.toml" mail-password TLS >/dev/null 2>&1

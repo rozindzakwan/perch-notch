@@ -130,11 +130,17 @@ pub fn settings_spec(cfg: &Config, monitors: &[Monitor], mail: &MailBoard) -> Fo
         fields.push(Field::Group("Mail accounts".into()));
         if cfg.mail.accounts.is_empty() {
             fields.push(Field::Note(
-                "No accounts yet. Perch only reads: it shows unread mail and never marks, \
-                 moves or deletes anything."
+                "No accounts yet. Perch shows unread mail and never moves, deletes or \
+                 downloads anything."
                     .into(),
             ));
         }
+        fields.push(Field::Toggle {
+            id: "mail_mark_read".into(),
+            label: "Allow marking mail as read (changes only the read flag)".into(),
+            value: cfg.mail.allow_mark_read,
+            disabled: false,
+        });
         for (i, a) in cfg.mail.accounts.iter().enumerate() {
             let status = mail
                 .accounts()
@@ -230,6 +236,7 @@ pub fn apply_settings_event(cfg: &Config, monitors: &[Monitor], ev: &FormEvent) 
             "autostart" => next.autostart = *v,
             "notify_in_notch" => next.notifications.in_notch = *v,
             "notify_system" => next.notifications.system = *v,
+            "mail_mark_read" => next.mail.allow_mark_read = *v,
             other => {
                 let Some(f) = Feature::ALL.iter().find(|f| feature_id(**f) == other) else {
                     return SettingsOutcome::None;
@@ -441,8 +448,9 @@ pub fn mail_account_spec(f: &MailForm, error: Option<&str>) -> FormSpec {
         text("port", "Port", &f.port, "993", false),
         Field::Note(
             "Read-only: Perch opens your inbox with EXAMINE and only reads sender, subject and \
-             time of unread mail. It never marks, moves, deletes or downloads messages. The \
-             password goes to the system keychain, not the config file."
+             time of unread mail. It never moves, deletes or downloads messages, and marks \
+             them read only if you turn that on in settings. The password goes to the system \
+             keychain, not the config file."
                 .into(),
         ),
     ];

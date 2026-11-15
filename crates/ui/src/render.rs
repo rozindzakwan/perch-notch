@@ -891,7 +891,9 @@ fn list(
         if filters.is_empty() {
             ctx.text(&count, x, top, hh, text::CAPTION, muted, w / 2.0);
         } else {
-            filter_pills(ctx, filters, x, top, w - 90.0 * s, hh);
+            // Leave room for the header chip ("Accounts", "Mark all read").
+            let chip_w = ctx.measure(label, text::CAPTION) + 16.0 * s;
+            filter_pills(ctx, filters, x, top, w - chip_w - 8.0 * s, hh);
         }
         glass::chip(ctx, x + w, top, label, action.clone());
         top += hh + 6.0 * s;

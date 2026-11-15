@@ -1,9 +1,11 @@
-//! Read-only IMAP client for the Mail tab.
+//! IMAP client for the Mail tab: read-only, plus an opt-in "mark as read".
 //!
 //! One thread per account. It signs in, opens the folder with `EXAMINE`
 //! (read-only: the server will not let this session change flags), asks for
 //! the unread UIDs and fetches only `UID INTERNALDATE ENVELOPE` for the newest
-//! few. Envelope fetches never set `\Seen`, so Perch cannot mark mail as read.
+//! few. Envelope fetches never set `\Seen`. Only when the user turned on
+//! `[mail] allow_mark_read` and clicks "Mark read" does a separate, short
+//! connection set the read flag ([`mark_read`]); nothing else is ever changed.
 //!
 //! New mail is pushed with IMAP IDLE (re-issued every 25 minutes, as RFC 2177
 //! asks); servers without IDLE are checked every `poll_minutes`. Network
@@ -533,15 +535,9 @@ fn login(conn: &mut Conn, caps: &[String], user: &str, password: &str) -> SessRe
     }
 }
 
-/// Sign in, open the folder read-only, then report and wait for changes until
-/// stopped or the connection fails.
-fn session(
-    account: &MailAccount,
-    password: &str,
-    opts: Options,
-    report: &Report,
-    ctl: &Ctl,
-) -> SessResult<()> {
+/// Connect, secure the connection and sign in. Returns the connection and
+/// the server's capabilities after sign-in.
+fn open(account: &MailAccount, password: &str, ctl: &Ctl) -> SessResult<(Conn, Vec<String>)> {
     let mut conn = connect(account, ctl)?;
     let mut caps = conn.read(|r| match r {
         Response::Data {
@@ -580,6 +576,19 @@ fn session(
     }
     login(&mut conn, &caps, account.username.trim(), password)?;
     caps = capabilities(&mut conn)?;
+    Ok((conn, caps))
+}
+
+/// Sign in, open the folder read-only, then report and wait for changes until
+/// stopped or the connection fails.
+fn session(
+    account: &MailAccount,
+    password: &str,
+    opts: Options,
+    report: &Report,
+    ctl: &Ctl,
+) -> SessResult<()> {
+    let (mut conn, caps) = open(account, password, ctl)?;
     let push = caps.iter().any(|c| c == "IDLE");
 
     let folder = quoted(account.folder.trim())
@@ -740,6 +749,88 @@ fn idle(conn: &mut Conn, ctl: &Ctl) -> SessResult<()> {
     conn.finish(&tag, SessErr::Fail, &mut |_| {})
 }
 
+/// The `UID STORE` set for a mark: these UIDs (`1,5,9`), or every message
+/// (`1:*`; read ones are unaffected). `None` for an empty list. Pure.
+pub fn store_set(uids: Option<&[u32]>) -> Option<String> {
+    match uids {
+        None => Some("1:*".into()),
+        Some([]) => None,
+        Some(u) => Some(u.iter().map(u32::to_string).collect::<Vec<_>>().join(",")),
+    }
+}
+
+/// Mark messages read (`[mail] allow_mark_read`), on a worker thread, over
+/// a connection of its own so the watcher's session stays read-only: sign
+/// in, `SELECT` the folder, check UIDVALIDITY is still the one the UIDs came
+/// from, set `\Seen` with `UID STORE ... +FLAGS.SILENT`, `LOGOUT`. Only the
+/// read flag is ever changed, and the folder is never `CLOSE`d (that would
+/// expunge messages marked deleted). The watcher sees the flag change and
+/// refreshes the list.
+pub fn mark_read(
+    account: MailAccount,
+    secrets: Arc<dyn SecretStore>,
+    uid_validity: u32,
+    uids: Option<Vec<u32>>,
+    done: impl FnOnce(Result<(), String>) + Send + 'static,
+) {
+    let spawned = std::thread::Builder::new()
+        .name(format!("perch-mail-mark-{}", account.name))
+        .spawn(move || {
+            let result = mark_read_now(&account, secrets.as_ref(), uid_validity, uids.as_deref());
+            done(result);
+        });
+    if let Err(e) = spawned {
+        log::warn!("mail: cannot start the mark thread: {e}");
+    }
+}
+
+fn mark_read_now(
+    account: &MailAccount,
+    secrets: &dyn SecretStore,
+    uid_validity: u32,
+    uids: Option<&[u32]>,
+) -> Result<(), String> {
+    let set = store_set(uids).ok_or("nothing to mark")?;
+    if let Some(p) = account.problem() {
+        return Err(p);
+    }
+    let password = match secrets.get(&account.secret_key()) {
+        Ok(Some(p)) if !p.is_empty() => p,
+        Ok(_) => return Err("no password stored".into()),
+        Err(e) => return Err(format!("keychain: {e}")),
+    };
+    let text = |e: SessErr| match e {
+        SessErr::Auth(m) => format!("sign-in rejected: {m}"),
+        SessErr::Fail(m) => m,
+        SessErr::Timeout => "the server stopped answering".into(),
+    };
+    let ctl = Ctl::default();
+    let (mut conn, _) = open(account, &password, &ctl).map_err(text)?;
+    let folder = quoted(account.folder.trim()).ok_or("folder names must be ASCII")?;
+    let mut now_validity = None;
+    conn.command(&format!("SELECT {folder}"), SessErr::Fail, |r| {
+        if let Response::Data { outcome, .. } = r {
+            if let Some(ResponseCode::UidValidity(v)) = outcome.code {
+                now_validity = Some(v);
+            }
+        }
+    })
+    .map_err(text)?;
+    if now_validity != Some(uid_validity) {
+        let _ = conn.command("LOGOUT", SessErr::Fail, |_| {});
+        return Err("the mailbox changed; the list will refresh".into());
+    }
+    conn.command(
+        &format!("UID STORE {set} +FLAGS.SILENT (\\Seen)"),
+        SessErr::Fail,
+        |_| {},
+    )
+    .map_err(text)?;
+    // LOGOUT, not CLOSE: CLOSE would expunge messages marked deleted.
+    let _ = conn.command("LOGOUT", SessErr::Fail, |_| {});
+    Ok(())
+}
+
 /// Runs one watcher per configured account and restarts exactly the ones whose
 /// settings (or password) changed.
 #[derive(Default)]
@@ -790,5 +881,17 @@ impl MailHub {
     /// No watchers.
     pub fn is_empty(&self) -> bool {
         self.running.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::store_set;
+
+    #[test]
+    fn store_sets_list_uids_or_everything() {
+        assert_eq!(store_set(Some(&[3, 9, 12])).as_deref(), Some("3,9,12"));
+        assert_eq!(store_set(None).as_deref(), Some("1:*"));
+        assert_eq!(store_set(Some(&[])), None);
     }
 }

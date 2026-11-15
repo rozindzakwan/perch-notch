@@ -119,6 +119,15 @@ pub enum Action {
     PinToggle,
     /// Show one mail account (`None` = all accounts).
     MailFilter(Option<String>),
+    /// Mark one message read on the server (`[mail] allow_mark_read`).
+    MailMarkRead {
+        /// Account name.
+        account: String,
+        /// The message's IMAP UID.
+        uid: u32,
+    },
+    /// Mark every unread message of an account read (`allow_mark_read`).
+    MailMarkAllRead(String),
     /// The banner was clicked: open the panel on its tab.
     BannerOpen,
 }

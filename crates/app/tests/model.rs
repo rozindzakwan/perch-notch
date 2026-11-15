@@ -1268,6 +1268,147 @@ fn today_is_the_first_tab_and_the_idle_pill_shows_the_time() {
 }
 
 #[test]
+fn mail_can_be_marked_read_only_when_allowed() {
+    use perch_core::config::MailAccount;
+    use perch_core::mail::{MailItem, MailUpdate};
+    let now = t0();
+    let item = |uid: u32, from: &str| MailItem {
+        uid,
+        from: from.into(),
+        subject: "hi".into(),
+        date_unix: Some(now.unix - u64::from(uid)),
+    };
+    let model = |allow: bool| {
+        let mut cfg = config_all();
+        cfg.features.mail = true;
+        cfg.mail.allow_mark_read = allow;
+        cfg.mail.accounts.push(MailAccount {
+            name: "Work".into(),
+            username: "me@example.com".into(),
+            host: "mail.example.com".into(),
+            ..MailAccount::default()
+        });
+        let mut m = Model::new(cfg, now);
+        m.mail_update(MailUpdate::Snapshot {
+            account: "Work".into(),
+            uid_validity: 42,
+            unread: 3,
+            items: vec![item(1, "Ann"), item(2, "Bob"), item(3, "Cara")],
+        });
+        m.action(Action::SelectTab(Tab::Mail), now);
+        m
+    };
+    let list = |m: &mut Model| match m.view(now).body {
+        Body::List { rows, header, .. } => (rows, header),
+        other => panic!("{other:?}"),
+    };
+
+    // Off (the default): strictly read-only, no buttons, actions ignored.
+    let mut m = model(false);
+    let (rows, header) = list(&mut m);
+    assert!(rows.iter().all(|r| r.chip.is_none()));
+    assert_eq!(header.map(|h| h.0).as_deref(), Some("Accounts"));
+    let fx = m.action(
+        Action::MailMarkRead {
+            account: "Work".into(),
+            uid: 2,
+        },
+        now,
+    );
+    assert!(fx.is_empty(), "{fx:?}");
+    assert_eq!(m.mail().total_unread(), 3);
+
+    // On: each row offers "Mark read" (on hover); the header marks all.
+    let mut m = model(true);
+    let (rows, header) = list(&mut m);
+    let bob = rows
+        .iter()
+        .find(|r| r.text == "Bob")
+        .unwrap_or_else(|| panic!("Bob"));
+    let mark_bob = Action::MailMarkRead {
+        account: "Work".into(),
+        uid: 2,
+    };
+    assert_eq!(bob.chip, Some(("Mark read".into(), mark_bob.clone())));
+    assert_eq!(
+        header,
+        Some((
+            "Mark all read".into(),
+            Action::MailMarkAllRead("Work".into())
+        ))
+    );
+    let fx = m.action(mark_bob, now);
+    assert!(fx.contains(&Effect::MailMarkRead {
+        account: "Work".into(),
+        uid_validity: 42,
+        uids: Some(vec![2]),
+    }));
+    let (rows, _) = list(&mut m);
+    assert!(rows.iter().all(|r| r.text != "Bob"), "gone at once");
+    assert_eq!(m.mail().total_unread(), 2);
+
+    // The server refused: say so, reconnect the account to get the truth.
+    let fx = m.mail_marked("Work", Err("NO [READ-ONLY]".into()), now);
+    assert!(fx.contains(&Effect::MailReconnect("Work".into())));
+    assert!(m.mail_marked("Work", Ok(()), now).is_empty());
+
+    // Mark all: every unread message of the account.
+    let fx = m.action(Action::MailMarkAllRead("Work".into()), now);
+    assert!(fx.contains(&Effect::MailMarkRead {
+        account: "Work".into(),
+        uid_validity: 42,
+        uids: None,
+    }));
+    assert_eq!(m.mail().total_unread(), 0);
+    let (rows, header) = list(&mut m);
+    assert!(rows.is_empty());
+    assert_eq!(
+        header.map(|h| h.0).as_deref(),
+        Some("Accounts"),
+        "nothing left to mark"
+    );
+}
+
+#[test]
+fn new_mail_banner_names_the_account_when_there_are_several() {
+    use perch_core::config::MailAccount;
+    use perch_core::mail::{MailItem, MailUpdate};
+    let now = t0();
+    let mut cfg = config_all();
+    cfg.features.mail = true;
+    for name in ["Work", "Gmail"] {
+        cfg.mail.accounts.push(MailAccount {
+            name: name.into(),
+            username: "me@example.com".into(),
+            host: "mail.example.com".into(),
+            ..MailAccount::default()
+        });
+    }
+    let mut m = Model::new(cfg, now);
+    m.set_panel_state(false, true, now);
+    let snap = |uids: &[u32]| MailUpdate::Snapshot {
+        account: "Gmail".into(),
+        uid_validity: 1,
+        unread: uids.len() as u32,
+        items: uids
+            .iter()
+            .map(|u| MailItem {
+                uid: *u,
+                from: "Ann".into(),
+                subject: "Lunch?".into(),
+                date_unix: Some(now.unix),
+            })
+            .collect(),
+    };
+    m.mail_update(snap(&[1]));
+    m.mail_update(snap(&[1, 2]));
+    let b = m.view(now).banner.unwrap_or_else(|| panic!("a banner"));
+    assert_eq!(b.title, "New mail from Ann");
+    assert_eq!(b.body, "Lunch?");
+    assert_eq!(b.app.as_deref(), Some("Gmail"));
+}
+
+#[test]
 fn mail_has_a_tab_per_account_plus_all() {
     use perch_core::config::MailAccount;
     use perch_core::mail::{MailItem, MailUpdate};

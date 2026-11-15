@@ -109,7 +109,11 @@ fn panels() -> Vec<(&'static str, Tab, Body)> {
                     mail("Build Bot", "Nightly build passed", "1h"),
                 ],
                 empty: "No unread mail.".into(),
-                header: Some(("Accounts".into(), Action::OpenSettings)),
+                // The Work tab, with marking as read allowed.
+                header: Some((
+                    "Mark all read".into(),
+                    Action::MailMarkAllRead("Work".into()),
+                )),
                 filters: [
                     ("All", 3, None),
                     ("Work", 2, Some("Work")),
@@ -119,7 +123,7 @@ fn panels() -> Vec<(&'static str, Tab, Body)> {
                 .map(|(label, count, acct)| perch_core::view::ListFilter {
                     label: label.into(),
                     count,
-                    selected: acct.is_none(),
+                    selected: acct == Some("Work"),
                     action: Action::MailFilter(acct.map(Into::into)),
                 })
                 .collect(),

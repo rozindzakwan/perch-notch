@@ -410,6 +410,9 @@ pub struct MailConfig {
     pub max_items: usize,
     /// Minutes between checks for servers without IMAP IDLE (push).
     pub poll_minutes: u32,
+    /// Let the Mail tab mark messages as read on the server (off = strictly
+    /// read-only). Only the read flag is ever changed.
+    pub allow_mark_read: bool,
     /// Accounts.
     pub accounts: Vec<MailAccount>,
 }
@@ -421,6 +424,7 @@ impl Default for MailConfig {
             notify_subject: true,
             max_items: 10,
             poll_minutes: 5,
+            allow_mark_read: false,
             accounts: Vec::new(),
         }
     }

@@ -119,6 +119,28 @@ fn session(
                 out,
                 "* 2 EXISTS\r\n* OK [UIDVALIDITY 42] UIDs valid\r\n{tag} OK [READ-ONLY] EXAMINE completed\r\n"
             )?;
+        } else if upper.starts_with("SELECT") {
+            write!(
+                out,
+                "* 2 EXISTS\r\n* OK [UIDVALIDITY 42] UIDs valid\r\n{tag} OK [READ-WRITE] SELECT completed\r\n"
+            )?;
+        } else if let Some(rest) = upper.strip_prefix("UID STORE ") {
+            // Only "+FLAGS.SILENT (\Seen)" is accepted: anything else would
+            // be the client changing more than the read flag.
+            let (set, change) = rest.split_once(' ').unwrap_or((rest, ""));
+            if change != "+FLAGS.SILENT (\\SEEN)" {
+                write!(out, "{tag} BAD only the read flag may change\r\n")?;
+                continue;
+            }
+            if let Ok(mut u) = unseen.lock() {
+                if set == "1:*" {
+                    u.clear();
+                } else {
+                    let marked: Vec<u32> = set.split(',').filter_map(|s| s.parse().ok()).collect();
+                    u.retain(|x| !marked.contains(x));
+                }
+            }
+            write!(out, "{tag} OK store done\r\n")?;
         } else if upper == "UID SEARCH UNSEEN" {
             let u = unseen.lock().map(|u| u.clone()).unwrap_or_default();
             let list = u.iter().map(u32::to_string).collect::<Vec<_>>().join(" ");
@@ -413,4 +435,145 @@ fn plaintext_to_a_remote_host_is_refused() {
         format!("{u:?}").contains("only allowed to localhost"),
         "{u:?}"
     );
+}
+
+/// Run a mark and wait for its answer.
+fn mark(acct: &MailAccount, uid_validity: u32, uids: Option<Vec<u32>>) -> Result<(), String> {
+    let (tx, rx) = channel();
+    perch_app::mail::mark_read(
+        acct.clone(),
+        secrets(Some("pw"), acct),
+        uid_validity,
+        uids,
+        move |r| {
+            let _ = tx.send(r);
+        },
+    );
+    rx.recv_timeout(Duration::from_secs(10))
+        .unwrap_or_else(|e| panic!("no answer from mark_read: {e}"))
+}
+
+#[test]
+fn marking_read_sets_only_the_seen_flag_over_its_own_connection() {
+    let server = serve(Script {
+        idle: false,
+        password: "pw",
+    });
+    let acct = account(server.port);
+    assert_eq!(mark(&acct, 42, Some(vec![5])), Ok(()));
+    assert_eq!(
+        server.unseen.lock().map(|u| u.clone()).unwrap_or_default(),
+        [3]
+    );
+    let cmds = server
+        .commands
+        .lock()
+        .map(|c| c.clone())
+        .unwrap_or_default();
+    assert!(cmds.iter().any(|c| c == "SELECT \"INBOX\""), "{cmds:?}");
+    assert!(
+        cmds.iter()
+            .any(|c| c == r"UID STORE 5 +FLAGS.SILENT (\Seen)"),
+        "{cmds:?}"
+    );
+    assert_eq!(cmds.last().map(String::as_str), Some("LOGOUT"), "{cmds:?}");
+    for never in ["CLOSE", "EXPUNGE", "UID EXPUNGE", "COPY", "MOVE"] {
+        assert!(
+            !cmds
+                .iter()
+                .any(|c| c.to_ascii_uppercase().starts_with(never)),
+            "{never} sent: {cmds:?}"
+        );
+    }
+    assert_eq!(server.connections.lock().map(|n| *n).unwrap_or(0), 1);
+
+    // "Mark all read" covers every message of the folder.
+    assert_eq!(mark(&acct, 42, None), Ok(()));
+    assert!(server.unseen.lock().map(|u| u.is_empty()).unwrap_or(false));
+    let cmds = server
+        .commands
+        .lock()
+        .map(|c| c.clone())
+        .unwrap_or_default();
+    assert!(
+        cmds.iter()
+            .any(|c| c == r"UID STORE 1:* +FLAGS.SILENT (\Seen)"),
+        "{cmds:?}"
+    );
+}
+
+#[test]
+fn a_changed_uidvalidity_marks_nothing() {
+    let server = serve(Script {
+        idle: false,
+        password: "pw",
+    });
+    let acct = account(server.port);
+    // The UIDs came from UIDVALIDITY 41; the server now says 42, so they
+    // may name other messages.
+    let r = mark(&acct, 41, Some(vec![5]));
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!(
+        server.unseen.lock().map(|u| u.clone()).unwrap_or_default(),
+        [3, 5]
+    );
+    let cmds = server
+        .commands
+        .lock()
+        .map(|c| c.clone())
+        .unwrap_or_default();
+    assert!(!cmds.iter().any(|c| c.starts_with("UID STORE")), "{cmds:?}");
+    // A wrong password is an error too, never a retry loop.
+    let mut wrong = acct.clone();
+    wrong.username = "someone@example.com".into();
+    assert!(mark(&wrong, 42, Some(vec![5])).is_err());
+}
+
+/// Against a real server (`scripts/mail-test.sh` runs it against Dovecot):
+/// the read-only watcher lists the unread mail, one message is marked read
+/// over the separate connection, and the watcher (still read-only, waiting
+/// in IDLE) sees it go. Configured by `PERCH_TEST_IMAP_*`.
+#[test]
+#[ignore = "needs a real IMAP server: run by scripts/mail-test.sh"]
+fn marks_one_message_read_on_a_real_server() {
+    let env = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("{k} not set"));
+    let acct = MailAccount {
+        name: "Real".into(),
+        username: env("PERCH_TEST_IMAP_USER"),
+        host: "localhost".into(),
+        port: env("PERCH_TEST_IMAP_PORT").parse().unwrap_or(1993),
+        security: Security::Tls,
+        ca_file: env("PERCH_TEST_IMAP_CA"),
+        ..MailAccount::default()
+    };
+    let secrets = secrets(Some(&env("PERCH_TEST_IMAP_PASSWORD")), &acct);
+    let (report, rx) = collector();
+    let _watcher = start(acct.clone(), secrets.clone(), opts(), report);
+    let (validity, unread, uid) = match wait_for(
+        &rx,
+        15,
+        |u| matches!(u, MailUpdate::Snapshot { items, .. } if !items.is_empty()),
+    ) {
+        MailUpdate::Snapshot {
+            uid_validity,
+            unread,
+            items,
+            ..
+        } => (uid_validity, unread, items[0].uid),
+        other => panic!("{other:?}"),
+    };
+    let (tx, done) = channel();
+    perch_app::mail::mark_read(acct, secrets, validity, Some(vec![uid]), move |r| {
+        let _ = tx.send(r);
+    });
+    let r = done
+        .recv_timeout(Duration::from_secs(15))
+        .unwrap_or_else(|e| panic!("no answer: {e}"));
+    assert_eq!(r, Ok(()));
+    // Pushed to the read-only session as a flag change.
+    wait_for(&rx, 15, |u| {
+        matches!(u, MailUpdate::Snapshot { unread: n, items, .. }
+            if *n == unread - 1 && items.iter().all(|i| i.uid != uid))
+    });
+    println!("marked uid {uid} read; unread {unread} -> {}", unread - 1);
 }

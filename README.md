@@ -43,7 +43,7 @@ config file.
 | **Location** | The place name on the Today tab ("Dago, Bandung"). Windows location services or GeoClue give the position; it is rounded to about 100 m and sent to OpenStreetMap Nominatim once an hour to name the place. Kept in memory only. Uses the network, only after you turn it on. | off |
 | **Now playing** | Track, artist, cover art, play/pause/next/previous and a seek bar. Windows: System Media Transport Controls (Spotify, browsers, Media Player...). Linux: MPRIS (Rhythmbox, Firefox, VLC, Spotify...). The collapsed pill shows the track, or the current lyric line, live, when synced lyrics are on. Drag the seek bar to jump. | on |
 | **Synced lyrics** | Time-synced lyrics from [LRCLIB](https://lrclib.net) for the current track, cached on disk. Uses the network, only after you turn it on. | off |
-| **Mail (read-only)** | Unread mail from your IMAP accounts (Gmail, company mail on Spacemail, Yahoo, iCloud, Fastmail, Zoho or any IMAP server): an unread count in the pill, a Mail tab with sender, subject and age (with several accounts, tabs above the list: **All** plus one per account, each with its unread count), and a notification for new mail. New mail is **pushed** (IMAP IDLE), not polled. Perch opens the inbox read-only and fetches only envelopes, so it **can't mark, move, delete or download** messages. Passwords live in the system keychain (Windows Credential Manager / GNOME Keyring), never in the config file. | off |
+| **Mail (read-only)** | Unread mail from your IMAP accounts (Gmail, company mail on Spacemail, Yahoo, iCloud, Fastmail, Zoho or any IMAP server): an unread count in the pill, a Mail tab with sender, subject and age (with several accounts, tabs above the list: **All** plus one per account, each with its unread count), and a notification for new mail (the notch opens halfway with the sender and subject, and the account name when you have several). New mail is **pushed** (IMAP IDLE), not polled. Perch opens the inbox read-only and fetches only envelopes, so it **can't move, delete or download** messages. Marking as read is **opt-in**: turn on "Allow marking mail as read" in settings and each row gets a **Mark read** button on hover, plus **Mark all read** for the account on screen. Only the read flag changes, over a short separate connection. Passwords live in the system keychain (Windows Credential Manager / GNOME Keyring), never in the config file. | off |
 | **Notifications from other apps** | Mirrors other apps' notifications (WhatsApp, Teams, Discord, Thunderbird...) into the notch as a half-open banner: the app's icon, the app, the sender and two lines of text. Click the banner to open that app. You can't reply from the banner: neither Windows nor Linux lets one app press another app's notification buttons. Windows: read locally through its notification access. Linux: a copy of each one sent to the desktop's notification service (D-Bus). Nothing is stored or sent. | off |
 | **To-do** | A short list with optional due times, which raise a notification. | on |
 | **Pomodoro** | 25/5 timer with the countdown in the collapsed pill. | off |
@@ -125,6 +125,7 @@ How each claim was checked:
 | Start at login | verified on Windows (HKCU Run) | CI-verified (XDG autostart file) | same | — |
 | Multi-monitor, mixed DPI | placement logic unit-tested with fake monitors; the dev machine has one 1080p monitor | same | same | — |
 | Mail (read-only) | verified on Windows against a real Dovecot server (TLS, Credential Manager, push, nothing marked read); Gmail/Spacemail themselves not signed into by the tests | CI-verified against Dovecot (TLS, STARTTLS, GNOME Keyring, push, read-only, wrong password not retried, add-account dialog typed into) | same | would work (no window) |
+| Mail: mark as read (opt-in) | model and client tests against a scripted server (only `+FLAGS.SILENT (\Seen)`, never `CLOSE`/`EXPUNGE`, a changed UIDVALIDITY marks nothing); the button itself not clicked by automation | CI-verified against Dovecot (exactly one message becomes `\Seen`, nothing deleted, Perch's read-only sessions follow through IDLE) | same | — |
 | Installer | verified on Windows (per-user NSIS install/uninstall, portable zip) | CI-verified (`.deb` installs and runs in a clean 22.04 container; `install.sh`) | — | — |
 
 **Wayland:** not supported yet. On a Wayland session Perch runs through
@@ -265,6 +266,7 @@ notify = true              # notification when new mail arrives
 notify_subject = true      # false: sender only (e.g. for shared screens)
 max_items = 10             # unread messages listed per account
 poll_minutes = 5           # only for servers without IMAP IDLE
+allow_mark_read = false    # true: "Mark read" buttons (changes only the read flag)
 
 [[mail.accounts]]          # added for you by "Add mail account…" in settings
 name = "Work"
@@ -313,7 +315,11 @@ this file. Data lives next to it: `%APPDATA%\perch\data` on Windows,
   turn it off). The settings window marks which features use the network.
 - Mail is read-only by construction: Perch opens the folder with `EXAMINE` and
   fetches only `UID INTERNALDATE ENVELOPE` for unread messages, never message
-  bodies. Passwords are stored only in the system keychain; the config file
+  bodies. If you turn on "Allow marking mail as read", a click opens a short
+  second connection that sets only the `\Seen` flag on the messages you
+  picked (`UID STORE ... +FLAGS.SILENT (\Seen)`) and logs out; it never
+  closes the folder (which could expunge deleted mail), moves or deletes
+  anything, and does nothing if the mailbox's UIDVALIDITY changed. Passwords are stored only in the system keychain; the config file
   holds the server and username. Unencrypted IMAP is refused except to
   `localhost`.
 - Clipboard history is kept in memory only and cleared when you turn the

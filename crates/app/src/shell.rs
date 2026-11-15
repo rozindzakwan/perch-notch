@@ -73,6 +73,14 @@ pub enum UserEvent {
     /// The mail client reported something.
     #[cfg(feature = "mail")]
     Mail(perch_core::mail::MailUpdate),
+    /// The server answered a mark-as-read.
+    #[cfg(feature = "mail")]
+    MailMarked {
+        /// Account name.
+        account: String,
+        /// Done, or why not.
+        result: Result<(), String>,
+    },
 }
 
 /// Which form the dialog window shows.
@@ -696,6 +704,21 @@ impl Shell {
                     }
                     None => log::warn!("clipboard unavailable"),
                 },
+                Effect::MailMarkRead {
+                    account,
+                    uid_validity,
+                    uids,
+                } => self.mark_mail_read(account, uid_validity, uids),
+                Effect::MailReconnect(account) => {
+                    #[cfg(feature = "mail")]
+                    {
+                        let secrets = self.secrets();
+                        let report = self.mail_report();
+                        self.mail.restart(&account, &secrets, &report);
+                    }
+                    #[cfg(not(feature = "mail"))]
+                    let _ = account;
+                }
                 Effect::LaunchApp(id) => {
                     if let Err(e) = self.services.opener.launch_app(&id) {
                         log::warn!("opening the app of a notification: {e}");
@@ -815,6 +838,35 @@ impl Shell {
     }
 
     /// Start or stop mail watchers so they match the config.
+    /// Set the read flag on the server over a short connection of its own
+    /// (the watcher's session stays read-only); the answer comes back as
+    /// `UserEvent::MailMarked`.
+    fn mark_mail_read(&mut self, account: String, uid_validity: u32, uids: Option<Vec<u32>>) {
+        #[cfg(feature = "mail")]
+        {
+            let Some(acct) = self
+                .model
+                .config()
+                .mail
+                .accounts
+                .iter()
+                .find(|a| a.name == account)
+                .cloned()
+            else {
+                return;
+            };
+            let secrets = self.secrets();
+            let proxy = std::sync::Mutex::new(self.proxy.clone());
+            crate::mail::mark_read(acct, secrets, uid_validity, uids, move |result| {
+                if let Ok(p) = proxy.lock() {
+                    let _ = p.send_event(UserEvent::MailMarked { account, result });
+                }
+            });
+        }
+        #[cfg(not(feature = "mail"))]
+        let _ = (account, uid_validity, uids);
+    }
+
     fn sync_mail(&mut self) {
         #[cfg(feature = "mail")]
         {
@@ -1474,6 +1526,12 @@ impl ApplicationHandler<UserEvent> for Shell {
                 if status && self.settings.is_some() {
                     self.refresh_settings_form();
                 }
+            }
+            #[cfg(feature = "mail")]
+            UserEvent::MailMarked { account, result } => {
+                let fx = self.model.mail_marked(&account, result, Now::real());
+                self.run_effects(el, fx);
+                self.request_redraw();
             }
         }
     }

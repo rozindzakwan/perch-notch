@@ -186,6 +186,40 @@ impl MailBoard {
         all
     }
 
+    /// The UIDVALIDITY of an account's last snapshot: UIDs mean something
+    /// only together with it.
+    pub fn uid_validity(&self, account: &str) -> Option<u32> {
+        self.accounts
+            .iter()
+            .find(|a| a.name == account)
+            .and_then(|a| a.baseline.map(|(v, _)| v))
+    }
+
+    /// Show messages as read right away, before the server confirms (its next
+    /// snapshot settles it either way): `Some(uids)` for those messages,
+    /// `None` for every unread message of the account. Returns how many
+    /// listed messages went.
+    pub fn mark_read_local(&mut self, account: &str, uids: Option<&[u32]>) -> usize {
+        let Some(a) = self.accounts.iter_mut().find(|a| a.name == account) else {
+            return 0;
+        };
+        let before = a.items.len();
+        match uids {
+            Some(u) => {
+                a.items.retain(|i| !u.contains(&i.uid));
+                let gone = before - a.items.len();
+                a.unread = a
+                    .unread
+                    .saturating_sub(u32::try_from(gone).unwrap_or(u32::MAX));
+            }
+            None => {
+                a.items.clear();
+                a.unread = 0;
+            }
+        }
+        before - a.items.len()
+    }
+
     /// Forget everything (feature turned off).
     pub fn clear(&mut self) {
         self.accounts.clear();
@@ -539,6 +573,25 @@ mod tests {
         assert_eq!(b.total_unread(), 1);
         // A message marked unread again (lower UID) is not "new".
         assert!(b.apply(snap(7, &[2, 5])).is_empty());
+    }
+
+    #[test]
+    fn marking_read_locally_drops_rows_and_counts_until_the_server_answers() {
+        let mut b = MailBoard::default();
+        b.set_accounts(&["Work".into()]);
+        assert_eq!(b.uid_validity("Work"), None, "no snapshot yet");
+        b.apply(snap(7, &[1, 2, 3]));
+        assert_eq!(b.uid_validity("Work"), Some(7));
+        assert_eq!(b.mark_read_local("Work", Some(&[2])), 1);
+        assert_eq!(b.total_unread(), 2);
+        assert_eq!(b.mark_read_local("Work", Some(&[99])), 0, "unknown uid");
+        assert_eq!(b.total_unread(), 2);
+        assert_eq!(b.mark_read_local("Nope", None), 0);
+        assert_eq!(b.mark_read_local("Work", None), 2);
+        assert_eq!(b.total_unread(), 0);
+        // The server's next snapshot is the truth (here: the mark failed).
+        assert!(b.apply(snap(7, &[1, 2, 3])).is_empty(), "not new mail");
+        assert_eq!(b.total_unread(), 3);
     }
 
     #[test]

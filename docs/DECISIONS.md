@@ -507,3 +507,29 @@ other apps' toasts read-only (`UserNotificationListener`), and on Linux
 only the notification daemon emits `ActionInvoked`; the specification has no
 method for a third party to invoke an action.
 Opening the app is the closest thing that works.
+
+## ADR-023: Marking mail as read, opt-in
+
+**Context.** Mail was read-only by construction (ADR on the mail client:
+`EXAMINE`, envelopes only), and the README promised Perch could not mark,
+move, delete or download mail. Being able to mark a message read from the
+notch was asked for.
+
+**Decision.** `[mail] allow_mark_read`, off by default, a toggle in the
+settings' mail section. When on, each mail row's hover chip is "Mark read"
+and the list header offers "Mark all read" for the account on screen. A
+click removes the rows at once (the server's next snapshot settles it) and
+starts a short connection of its own: sign in, `SELECT` the folder, check
+that UIDVALIDITY is still the one the UIDs came from, `UID STORE <uids>
++FLAGS.SILENT (\Seen)` (mark all: `1:*`), `LOGOUT`. The watcher's
+long-lived session stays `EXAMINE` (read-only), and it sees the flag change
+through IDLE and refreshes. A failure flashes "Could not mark as read" and
+reconnects the account so its list is right again.
+
+- `LOGOUT`, never `CLOSE`: `CLOSE` expunges messages that another client
+  marked deleted.
+- A separate connection rather than switching the watcher to `SELECT`: the
+  always-on session can never change anything, whatever happens to it.
+- Moving, deleting, flagging and replying stay out of scope; the promise is
+  now "never moves, deletes or downloads", and changes only the read flag
+  when you allow it.

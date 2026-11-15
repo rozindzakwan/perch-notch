@@ -19,7 +19,7 @@ Environments:
 | `cargo fmt --all --check` | Windows, container | clean |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Windows (default features; GNU can't build `speech`) | clean (0 warnings) |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | container | clean (0 warnings) |
-| `cargo test --workspace` | Windows | 416 passed, 0 failed, 7 ignored (opt-in hardware tests, run separately below, and the release-only render budget) |
+| `cargo test --workspace` | Windows | 422 passed, 0 failed, 8 ignored (opt-in hardware tests, run separately below, the release-only render budget, and the real-server mail test that `mail-test.sh` runs) |
 | `cargo test --release -p perch-ui --test budget` | Windows | settled Music panel: **1.9 ms at 1×, 6.5 ms at 2×** (budgets 4 / 8 ms) |
 | `cargo test --workspace --all-features --locked` | container | all passed, 0 failed |
 | `cargo audit` | Windows | 0 vulnerabilities; 7 warnings: 6 unmaintained crates (paste, proc-macro-error, ttf-parser, zbus_names, zvariant, zvariant_derive) and `glib` 0.18 "unsound", which is only in the lockfile through `tray-icon`'s Linux GTK deps and is never compiled (tray-icon is Windows-only here; Linux uses ksni) |
@@ -262,6 +262,16 @@ Not automated, on purpose: the live location lookup (Windows `Geolocator` /
 GeoClue, then Nominatim), because it would send this machine's position to
 an outside service; reading a real app's logo and opening it through
 `shell:AppsFolder` on Windows; `gtk-launch` on Linux.
+
+## 3d. Mail: mark as read (opt-in)
+
+| Test | Where | Result |
+|---|---|---|
+| core `MailBoard`: marking locally drops the rows and the count, unknown UIDs and accounts do nothing, the server's next snapshot is the truth and is not announced as new mail | both | passed |
+| model: off by default (no buttons, the action is ignored); on: each row's hover chip is "Mark read", the header is "Mark all read" for the account on screen; a click removes the row at once and asks for `MailMarkRead` with the account's UIDVALIDITY; a refusal flashes a message and reconnects the account; mark all asks for every unread message | both | passed |
+| model: the new-mail banner names the account when there are several | both | passed |
+| client against the scripted server: `SELECT`, `UID STORE 5 +FLAGS.SILENT (\Seen)`, `LOGOUT` on one connection, never `CLOSE`/`EXPUNGE`/`COPY`/`MOVE`; mark all is `UID STORE 1:*`; a changed UIDVALIDITY sends no `STORE`; a wrong password is an error, not a retry | both | passed |
+| `mail-test.sh` against Dovecot: the read-only watcher lists the mail, one message is marked read, the watcher sees it through IDLE; `doveadm` then finds exactly **1** `\Seen` message, none deleted, none missing; Perch's own running sessions drop from 6 to 4 unread (both accounts read that mailbox) | container | passed |
 
 ## 3b. Mail (read-only IMAP)
 
