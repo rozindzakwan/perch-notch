@@ -253,6 +253,7 @@ pub fn set_feature(cfg: &mut Config, f: Feature, on: bool) {
         Feature::Screenshot => &mut flags.screenshot,
         Feature::CameraMirror => &mut flags.camera_mirror,
         Feature::Mail => &mut flags.mail,
+        Feature::NotificationMirror => &mut flags.notification_mirror,
     };
     *slot = on;
     // Lyrics need something to sync to.

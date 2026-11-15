@@ -72,6 +72,18 @@ pub enum MediaEvent {
     Gone,
 }
 
+/// A notification shown by another app. Held in memory only for the banner;
+/// never stored or logged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForeignNotification {
+    /// The app that sent it ("WhatsApp").
+    pub app: String,
+    /// First line (usually the sender or subject).
+    pub title: String,
+    /// The rest of the text.
+    pub body: String,
+}
+
 /// Anything the platform layer can wake the app up for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlatformEvent {
@@ -105,6 +117,8 @@ pub enum PlatformEvent {
     /// The set of audio sessions or one of their volumes changed; the app
     /// re-reads them through [`AudioMixer`].
     AudioSessionsChanged,
+    /// Another app showed a notification (mirrored into the notch).
+    ForeignNotification(ForeignNotification),
     /// A registered global hotkey went down (`pressed = true`) or up.
     Hotkey {
         /// The id the hotkey was registered under (e.g. `"dictate"`).
@@ -138,6 +152,12 @@ pub struct AudioSession {
     /// Muted.
     pub muted: bool,
 }
+
+/// Id of the mixer row for the output device's main volume (what the
+/// taskbar / panel speaker shows). Backends list it first in
+/// [`AudioMixer::sessions`]; `set_volume` / `set_mute` with this id change the
+/// device itself.
+pub const SYSTEM_VOLUME_ID: &str = "@system";
 
 /// Per-application volume control.
 pub trait AudioMixer {

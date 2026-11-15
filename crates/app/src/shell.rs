@@ -33,6 +33,8 @@ use crate::persist::{self, Status};
 
 /// Minimum interval between animation frames (~120 fps).
 const FRAME_INTERVAL: Duration = Duration::from_millis(8);
+/// Logical size of a banner: the notch opened halfway.
+const BANNER_SIZE: (f32, f32) = (360.0, 88.0);
 /// Debounce for config-file change notifications (editors write in bursts).
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(150);
 
@@ -107,6 +109,10 @@ pub struct Shell {
     shot_at: Option<Instant>,
     cursor: (f32, f32),
     press: Option<(f32, f32)>,
+    /// A slider being dragged, and whether the pointer left the pill meanwhile
+    /// (the leave is applied on release, so the panel stays open mid-drag).
+    drag: Option<perch_core::view::SliderDrag>,
+    left_during_drag: bool,
     reload_at: Option<Instant>,
     status_path: Option<PathBuf>,
     last_status: Option<Status>,
@@ -184,6 +190,8 @@ impl Shell {
             shot_at: None,
             cursor: (0.0, 0.0),
             press: None,
+            drag: None,
+            left_during_drag: false,
             reload_at: None,
             status_path: std::env::var_os("PERCH_STATUS_FILE").map(PathBuf::from),
             last_status: None,
@@ -218,7 +226,13 @@ impl Shell {
         let min = geo.collapsed.0;
         let max = min.max(320);
         if let Some(r) = &mut self.renderer {
-            let want = r.pill_width(&self.model.collapsed(), scale).clamp(min, max);
+            // Lyrics change every few seconds: a steady, wide pill reads
+            // better than one that resizes on every line.
+            let want = if self.model.pill_shows_lyric() {
+                max
+            } else {
+                r.pill_width(&self.model.collapsed(), scale).clamp(min, max)
+            };
             self.motion
                 .target_size(want as f32, self.model.panel_height_hint() as f32);
         } else {
@@ -229,12 +243,15 @@ impl Shell {
         self.notch.set_banner(banner);
         if banner {
             self.motion.target_size(
-                300.0f32.max(min as f32),
+                BANNER_SIZE.0.max(min as f32),
                 self.model.panel_height_hint() as f32,
             );
         }
-        self.motion
-            .target_pill_height(if banner { 56.0 } else { geo.collapsed.1 as f32 });
+        self.motion.target_pill_height(if banner {
+            BANNER_SIZE.1
+        } else {
+            geo.collapsed.1 as f32
+        });
         geo.collapsed.0 = self.motion.width().round().max(1.0) as u32;
         geo.collapsed.1 = self.motion.pill_height().round().max(1.0) as u32;
         geo.expanded.1 = self.motion.height().round().max(1.0) as u32;
@@ -1422,6 +1439,7 @@ impl ApplicationHandler<UserEvent> for Shell {
             WindowEvent::CursorEntered { .. } => {
                 if id == pill_id {
                     self.cursor_inside = true;
+                    self.left_during_drag = false;
                     self.model.banner_hover(true, Now::real());
                 }
                 let ev = if id == hot_id {
@@ -1448,6 +1466,11 @@ impl ApplicationHandler<UserEvent> for Shell {
                     NotchEvent::PointerLeft
                 };
                 self.press = None;
+                if id == pill_id && self.drag.is_some() {
+                    // Mid-drag: keep the panel open; the leave counts on release.
+                    self.left_during_drag = true;
+                    return;
+                }
                 if self.notch.handle(ev) {
                     self.after_notch_change(el);
                 }
@@ -1464,6 +1487,13 @@ impl ApplicationHandler<UserEvent> for Shell {
             WindowEvent::CursorMoved { position, .. } if id == pill_id => {
                 self.cursor = (position.x as f32, position.y as f32);
                 let (cx, cy) = self.cursor;
+                if let Some(drag) = self.drag.clone() {
+                    let fx =
+                        self.model
+                            .drag_slider(drag.target.clone(), drag.value_at(cx), Now::real());
+                    self.run_effects(el, fx);
+                    return;
+                }
                 let hovered = self
                     .hits
                     .iter()
@@ -1494,8 +1524,38 @@ impl ApplicationHandler<UserEvent> for Shell {
                 button: MouseButton::Left,
                 ..
             } if id == pill_id => match state {
-                ElementState::Pressed => self.press = Some(self.cursor),
+                ElementState::Pressed => {
+                    let (cx, cy) = self.cursor;
+                    match perch_core::view::slider_at(&self.hits, cx, cy) {
+                        Some(drag) if self.expanded() => {
+                            // Sliders follow the pointer while the button is held.
+                            let fx = self.model.drag_slider(
+                                drag.target.clone(),
+                                drag.value_at(cx),
+                                Now::real(),
+                            );
+                            self.drag = Some(drag);
+                            self.left_during_drag = false;
+                            self.run_effects(el, fx);
+                        }
+                        _ => self.press = Some(self.cursor),
+                    }
+                }
                 ElementState::Released => {
+                    if let Some(drag) = self.drag.take() {
+                        let fx = self.model.end_drag(
+                            drag.target.clone(),
+                            drag.value_at(self.cursor.0),
+                            Now::real(),
+                        );
+                        self.run_effects(el, fx);
+                        if std::mem::take(&mut self.left_during_drag)
+                            && self.notch.handle(NotchEvent::PointerLeft)
+                        {
+                            self.after_notch_change(el);
+                        }
+                        return;
+                    }
                     if let Some((px, py)) = self.press.take() {
                         let moved = (self.cursor.0 - px).abs() + (self.cursor.1 - py).abs();
                         if moved <= 8.0 {

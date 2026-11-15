@@ -694,3 +694,55 @@ fn time_bars_are_rounded_gradients() {
     }
     assert!(best.2 > 180, "a coral gradient bar is drawn");
 }
+
+/// Brightest pixel (max channel) in the rows `[y0, y1)` between x0 and x1.
+fn brightest(pm: &Pixmap, x0: u32, x1: u32, y0: u32, y1: u32) -> u8 {
+    let mut best = 0;
+    for y in y0..y1.min(pm.height()) {
+        for x in x0..x1.min(pm.width()) {
+            if let Some(p) = pm.pixel(x, y) {
+                best = best.max(p.red()).max(p.green()).max(p.blue());
+            }
+        }
+    }
+    best
+}
+
+#[test]
+fn a_mirrored_notification_banner_shows_the_app_and_two_lines_of_text() {
+    let view = |body: &str, app: Option<&str>| PanelView {
+        banner: Some(perch_core::view::BannerView {
+            leading: perch_core::view::RowLeading::Avatar {
+                initials: "WA".into(),
+                seed: 7,
+            },
+            title: "Ann".into(),
+            body: body.into(),
+            tab: None,
+            app: app.map(str::to_string),
+        }),
+        ..PanelView::default()
+    };
+    let long = "See you at eight at the usual place, and please bring the charger \
+                and the blue folder from my desk";
+    let (two, _) = render(&view(long, Some("WhatsApp")), 360, 88, 1.0, 0.0);
+    let (one, _) = render(&view("Short", Some("WhatsApp")), 360, 88, 1.0, 0.0);
+    // Body text sits in the lower part; the long one fills a second line
+    // that the short one leaves empty.
+    let second_line = |pm: &Pixmap| brightest(pm, 70, 340, 62, 80);
+    assert!(
+        second_line(&two) > second_line(&one) + 40,
+        "wrapped onto a second line: {} vs {}",
+        second_line(&two),
+        second_line(&one)
+    );
+    // The caption (app name) is drawn above the title.
+    let (bare, _) = render(&view("Short", None), 360, 88, 1.0, 0.0);
+    let caption_row = |pm: &Pixmap| brightest(pm, 70, 200, 8, 20);
+    assert!(
+        caption_row(&one) > caption_row(&bare) + 40,
+        "caption shown: {} vs {}",
+        caption_row(&one),
+        caption_row(&bare)
+    );
+}

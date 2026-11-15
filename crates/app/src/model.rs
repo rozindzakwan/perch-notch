@@ -159,6 +159,12 @@ pub struct Model {
 
     media: MediaState,
     media_reported_at: Instant,
+    /// Seek-bar position while it is being dragged (0..=1); the seek goes
+    /// out once, on release.
+    seek_preview: Option<f32>,
+    /// The lyric line the collapsed pill shows (kept by `tick`, which runs at
+    /// each line change while lyrics are on and a track plays).
+    pill_lyric: Option<String>,
     cover: Option<(Arc<Vec<u8>>, u32)>,
     accent: Option<([u8; 3], [u8; 3])>,
     lyrics: Option<(String, Lyrics)>,
@@ -205,6 +211,8 @@ impl Model {
             pinned: false,
             media: MediaState::new(),
             media_reported_at: now.instant,
+            seek_preview: None,
+            pill_lyric: None,
             cover: None,
             accent: None,
             lyrics: None,
@@ -328,6 +336,7 @@ impl Model {
                     title: summary,
                     body,
                     tab: Some(Tab::Mail),
+                    app: None,
                 },
                 at,
             ));
@@ -496,6 +505,7 @@ impl Model {
                 title: text,
                 body: String::new(),
                 tab: None,
+                app: None,
             };
             if self.visible {
                 self.banners.push(b, now.instant);
@@ -572,6 +582,11 @@ impl Model {
                 fx.push(Effect::Redraw);
             }
         }
+        let lyric = self.current_lyric(now);
+        if lyric != self.pill_lyric {
+            self.pill_lyric = lyric;
+            fx.push(Effect::Redraw);
+        }
         if self.banners.tick(now.instant) {
             fx.push(Effect::Redraw);
         }
@@ -589,6 +604,7 @@ impl Model {
                             title: summary.into(),
                             body: body.into(),
                             tab: Some(Tab::Tasks),
+                            app: None,
                         },
                         now,
                     ));
@@ -622,6 +638,7 @@ impl Model {
                             title: "To-do due".into(),
                             body: text,
                             tab: Some(Tab::Tasks),
+                            app: None,
                         },
                         now,
                     ));
@@ -648,6 +665,7 @@ impl Model {
                 title: summary.into(),
                 body: body.into(),
                 tab: Some(Tab::Tasks),
+                app: None,
             },
             now,
         )
@@ -713,7 +731,9 @@ impl Model {
                 d = Some(next.min(Duration::from_secs(1)));
             }
             ds.push(d);
-        } else if self.media.is_playing() && self.lyrics.is_some() && expanded {
+        } else if self.is_active(Feature::Media) && self.media.is_playing() && self.lyrics.is_some()
+        {
+            // Expanded or not: the collapsed pill shows the current line too.
             ds.push(self.next_lyric_change(now));
         }
         crate::features::soonest(&ds)
@@ -724,6 +744,24 @@ impl Model {
             now.instant
                 .saturating_duration_since(self.media_reported_at),
         )
+    }
+
+    /// The lyric line to show right now: lyrics on, a track playing, and a
+    /// non-empty line at the playhead.
+    fn current_lyric(&self, now: Now) -> Option<String> {
+        if !self.is_active(Feature::Media) || !self.media.is_playing() {
+            return None;
+        }
+        let (_, lyrics) = self.lyrics.as_ref()?;
+        let line = lyrics.line_at(self.position_now(now)?)?;
+        let text = line.text.trim();
+        (!text.is_empty()).then(|| text.to_string())
+    }
+
+    /// The collapsed pill is showing a lyric line (it then keeps a steady,
+    /// wide size instead of resizing on every line).
+    pub fn pill_shows_lyric(&self) -> bool {
+        self.pill_lyric.is_some() && self.message.is_none()
     }
 
     fn next_lyric_change(&self, now: Now) -> Option<Duration> {
@@ -739,6 +777,38 @@ impl Model {
     pub fn handle_event(&mut self, event: &PlatformEvent, now: Now) -> Vec<Effect> {
         match event {
             PlatformEvent::Media(ev) if self.is_active(Feature::Media) => self.media_event(ev, now),
+            PlatformEvent::ForeignNotification(n)
+                if self.is_active(Feature::NotificationMirror)
+                    && self.config.notifications.in_notch =>
+            {
+                // Already a system notification: only the in-notch banner,
+                // never echoed back as a toast.
+                let b = perch_core::view::BannerView {
+                    leading: match perch_core::view::app_colour(&n.app) {
+                        Some(rgb) => RowLeading::Disc {
+                            initials: perch_core::view::initials(&n.app),
+                            rgb,
+                        },
+                        None => RowLeading::Avatar {
+                            initials: perch_core::view::initials(&n.app),
+                            seed: perch_core::view::seed(&n.app),
+                        },
+                    },
+                    title: n.title.clone(),
+                    body: n.body.clone(),
+                    tab: None,
+                    app: Some(n.app.clone()),
+                };
+                if self.panel_expanded {
+                    Vec::new()
+                } else if !self.visible {
+                    self.deferred_banner = Some(b);
+                    Vec::new()
+                } else {
+                    self.banners.push(b, now.instant);
+                    vec![Effect::Redraw]
+                }
+            }
             PlatformEvent::ActiveWindowChanged { app, .. }
                 if self.is_active(Feature::ScreenTime) =>
             {
@@ -872,7 +942,13 @@ impl Model {
 
     /// The shell re-read the audio sessions.
     pub fn sessions_captured(&mut self, mut sessions: Vec<AudioSession>) -> Vec<Effect> {
-        sessions.sort_by_key(|s| s.name.to_lowercase());
+        // The device's main volume first, then apps by name.
+        sessions.sort_by_key(|s| {
+            (
+                s.id != perch_core::platform::SYSTEM_VOLUME_ID,
+                s.name.to_lowercase(),
+            )
+        });
         if sessions == self.sessions {
             return Vec::new();
         }
@@ -949,6 +1025,26 @@ impl Model {
                 Vec::new()
             }
         }
+    }
+
+    /// A slider is being dragged to `v`. Volume and noise levels apply live;
+    /// the seek bar only previews until [`Model::end_drag`].
+    pub fn drag_slider(&mut self, target: SliderTarget, v: f32, now: Now) -> Vec<Effect> {
+        match target {
+            SliderTarget::Seek => {
+                self.seek_preview = Some(clamp01(v));
+                vec![Effect::Redraw]
+            }
+            other => self.action(Action::Slider(other, v), now),
+        }
+    }
+
+    /// The drag ended at `v`: commit it (one seek for the seek bar).
+    pub fn end_drag(&mut self, target: SliderTarget, v: f32, now: Now) -> Vec<Effect> {
+        self.seek_preview = None;
+        let mut fx = self.action(Action::Slider(target, v), now);
+        fx.push(Effect::Redraw);
+        fx
     }
 
     /// Carry out a user action.
@@ -1146,7 +1242,9 @@ impl Model {
                     Some(label) if self.is_active(Feature::Media) && self.media.is_playing() => {
                         let thumb = self.cover.clone();
                         let glyph = thumb.is_none().then_some(Glyph::Music);
-                        (thumb, glyph, label)
+                        // With lyrics on, the current line replaces the title.
+                        let text = self.pill_lyric.clone().unwrap_or(label);
+                        (thumb, glyph, text)
                     }
                     _ => (None, None, String::new()),
                 }
@@ -1285,6 +1383,9 @@ impl Model {
                             target: SliderTarget::Volume(s.id.clone()),
                             toggle: Action::MuteToggle(s.id.clone()),
                             leading: match perch_core::view::app_colour(&s.name) {
+                                _ if s.id == perch_core::platform::SYSTEM_VOLUME_ID => {
+                                    RowLeading::Kind(perch_core::view::RowKind::Speaker)
+                                }
                                 Some(rgb) => RowLeading::Disc {
                                     initials: perch_core::view::initials(&s.name),
                                     rgb,
@@ -1418,8 +1519,12 @@ impl Model {
 
     fn media_view(&self, now: Now) -> MediaView {
         let track = self.media.track();
-        let pos = self.position_now(now);
         let duration = track.and_then(|t| t.duration);
+        // While the seek bar is dragged, show where it would land.
+        let pos = match (self.seek_preview, duration) {
+            (Some(f), Some(d)) => Some(d.mul_f64(f64::from(f))),
+            _ => self.position_now(now),
+        };
         let fraction = match (pos, duration) {
             (Some(p), Some(d)) if !d.is_zero() => {
                 Some((p.as_secs_f64() / d.as_secs_f64()).clamp(0.0, 1.0))

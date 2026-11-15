@@ -161,6 +161,8 @@ pub struct BannerView {
     pub body: String,
     /// The tab a click opens.
     pub tab: Option<Tab>,
+    /// The app it came from, as a small caption (mirrored notifications).
+    pub app: Option<String>,
 }
 
 /// The collapsed pill's content.
@@ -229,6 +231,8 @@ pub enum RowKind {
     Sound,
     /// Mail.
     Mail,
+    /// The output device (system volume).
+    Speaker,
 }
 
 /// What sits at the start of a row.
@@ -491,6 +495,43 @@ pub fn resolve_click(hits: &[Hit], px: f32, py: f32) -> Option<Action> {
         }
         HitKind::ShelfItem(id) => Action::ShelfOpen(*id),
     })
+}
+
+/// A slider grabbed by the pointer: where it lies, so a drag keeps mapping
+/// the pointer to a value even outside the slider (or the window).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SliderDrag {
+    /// What the slider controls.
+    pub target: SliderTarget,
+    /// Left edge.
+    pub x: f32,
+    /// Width.
+    pub w: f32,
+}
+
+impl SliderDrag {
+    /// Value 0..=1 for the pointer at `px`, clamped at both ends.
+    pub fn value_at(&self, px: f32) -> f32 {
+        if self.w > 0.0 {
+            ((px - self.x) / self.w).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+}
+
+/// The slider under a point, for starting a drag (topmost region wins, as for
+/// clicks).
+pub fn slider_at(hits: &[Hit], px: f32, py: f32) -> Option<SliderDrag> {
+    let hit = hits.iter().rev().find(|h| h.contains(px, py))?;
+    match &hit.kind {
+        HitKind::Slider(target) => Some(SliderDrag {
+            target: target.clone(),
+            x: hit.x,
+            w: hit.w,
+        }),
+        _ => None,
+    }
 }
 
 /// The shelf item under a point, for starting a drag.

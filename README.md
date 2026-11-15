@@ -6,9 +6,10 @@ your to-dos, clipboard history, unread mail, a file shelf, a volume mixer and a
 few tools.
 Move away and it shrinks back.
 
-Written in Rust, with no Electron, no WebView and no background polling. Idle,
-it uses about 30 MB of RAM and no CPU. It runs on **Windows 10/11** and
-**Linux Mint Cinnamon (X11)**.
+Written in Rust, with no Electron, no WebView and no background polling (the
+one exception is opt-in: mirroring other apps' notifications checks a file
+once a second). Idle, it uses about 30 MB of RAM and no CPU. It runs on
+**Windows 10/11** and **Linux Mint Cinnamon (X11)**.
 
 ![The expanded panel on the Music tab](docs/img/panel-music.png)
 
@@ -38,15 +39,16 @@ config file.
 
 | Feature | What it does | Default |
 |---|---|---|
-| **Now playing** | Track, artist, cover art, play/pause/next/previous and a seek bar. Windows: System Media Transport Controls (Spotify, browsers, Media Player...). Linux: MPRIS (Rhythmbox, Firefox, VLC, Spotify...). The collapsed pill shows the track. | on |
+| **Now playing** | Track, artist, cover art, play/pause/next/previous and a seek bar. Windows: System Media Transport Controls (Spotify, browsers, Media Player...). Linux: MPRIS (Rhythmbox, Firefox, VLC, Spotify...). The collapsed pill shows the track, or the current lyric line, live, when synced lyrics are on. Drag the seek bar to jump. | on |
 | **Synced lyrics** | Time-synced lyrics from [LRCLIB](https://lrclib.net) for the current track, cached on disk. Uses the network, only after you turn it on. | off |
 | **Mail (read-only)** | Unread mail from your IMAP accounts (Gmail, company mail on Spacemail, Yahoo, iCloud, Fastmail, Zoho or any IMAP server): an unread count in the pill, a Mail tab with sender, subject and age, and a notification for new mail. New mail is **pushed** (IMAP IDLE), not polled. Perch opens the inbox read-only and fetches only envelopes, so it **can't mark, move, delete or download** messages. Passwords live in the system keychain (Windows Credential Manager / GNOME Keyring), never in the config file. | off |
+| **Notifications from other apps** | Mirrors Windows notifications (WhatsApp, Teams, Discord, Outlook...) into the notch as a half-open banner: app, sender and two lines of text. Reads them locally through Windows' notification access; nothing is stored or sent. Windows only for now. | off |
 | **To-do** | A short list with optional due times, which raise a notification. | on |
 | **Pomodoro** | 25/5 timer with the countdown in the collapsed pill. | off |
 | **Clipboard history** | Text and images, 50 entries, in memory only. Copies that password managers mark as secret are **never read** (Windows clipboard-exclusion formats; X11 `x-kde-passwordManagerHint`). | off |
 | **File shelf** | Drop files onto the panel to park them. Drag them out again on Windows; on Linux, click to copy them to the clipboard. | off |
 | **Reminders** | Drink water every hour; stretch after 45 minutes of active use (idle time doesn't count). | off |
-| **Volume mixer** | A slider and mute button per application. Windows: WASAPI audio sessions. Linux: PulseAudio / PipeWire-Pulse. | off |
+| **Volume mixer** | The system volume (kept in sync with the taskbar speaker and the volume keys) and a slider and mute button per application; drag the sliders. Windows: WASAPI. Linux: PulseAudio / PipeWire-Pulse. | off |
 | **White noise** | Rain, forest and waves, generated procedurally and mixable. No audio files ship with the app. The audio device is opened only while something plays. | off |
 | **Screen time** | Per-app foreground time for each day, kept for 30 days in a local SQLite file. | off |
 | **Screenshot** | Drag a region, annotate it (pen, arrow, text), then copy, save or "copy text" (OCR). OCR uses Windows.Media.Ocr or `tesseract` on Linux, both offline. | off |
@@ -58,9 +60,10 @@ StatusNotifierItem with an XEmbed fallback), a settings window, live reload of
 the config file, start-at-login, a hide-while-fullscreen option, global
 hotkeys, and a command line that talks to the running instance.
 
-Notifications (new mail, due to-dos, Pomodoro phases, reminders) appear as a
-**banner that grows out of the pill** for four seconds; hover it to keep it,
-click it to open the matching tab. They wait while a fullscreen app is
+Notifications (new mail, due to-dos, Pomodoro phases, reminders and, if you
+turn it on, other apps' notifications) **open the notch halfway** for four
+seconds with just the essentials: who, what, and two lines of text. Hover
+to keep it, click it to open the matching tab. They wait while a fullscreen app is
 active. System notifications are off by default and can be turned on in
 settings (`[notifications] system = true`).
 
@@ -227,6 +230,7 @@ screenshot = false
 camera_mirror = false
 speech_to_text = false     # perch-speech build; downloads a model once
 mail = false               # network: your IMAP servers, read-only
+notification_mirror = false  # show other apps' notifications (Windows)
 
 [notifications]
 in_notch = true            # banners inside the notch
@@ -297,6 +301,10 @@ this file. Data lives next to it: `%APPDATA%\perch\data` on Windows,
   Save. OCR runs locally.
 - The camera and microphone are opened only while the mirror is visible or
   dictation is recording.
+- Notifications from other apps (off by default) are read locally through
+  Windows' notification access (Settings > Privacy & security >
+  Notifications), held in memory only for the banner, and never stored, logged
+  or sent. Turn the feature off and the reader stops.
 
 ## Performance
 
@@ -466,7 +474,9 @@ The main ones:
 - **Event-driven only:** OS callbacks (WinEvent hooks, SMTC events, D-Bus
   signals, X11 events) feed winit's event loop through an `EventLoopProxy`.
   Timers are deadlines (`ControlFlow::WaitUntil`). No tokio, no polling
-  (ADR-002, ADR-006).
+  (ADR-002, ADR-006), except the opt-in notification mirror, which checks the
+  notification store's timestamp once a second because Windows gives
+  unpackaged apps no change event (ADR-020).
 - **GNU toolchain on Windows** for local builds, because no admin rights means
   no MSVC; CI builds both (ADR-003).
 - **Linux verified in an Ubuntu 22.04 container** that runs the same script as
@@ -480,6 +490,10 @@ The main ones:
   budget (≤ 4 ms at 1×, ≤ 8 ms at 2×) is checked by a test (ADR-019).
 - **No acrylic blur (yet):** on Windows 11 the backdrop can't be confined
   to the rounded shape of a per-pixel-transparent window (ADR-018).
+- **Other apps' notifications:** read through Windows' notification access;
+  with no change event for unpackaged apps, an opt-in worker checks the
+  store's timestamp once a second and reads the list only when it changed
+  (ADR-020).
 - **Unsafe code** only in thin OS wrappers, each block with a `// SAFETY:`
   comment. `#![forbid(unsafe_code)]` everywhere else.
 

@@ -921,3 +921,172 @@ fn ipc_todo_takes_an_optional_relative_due_time() {
         "not a due time: kept as text: {items:?}"
     );
 }
+
+#[test]
+fn dragging_the_seek_bar_previews_and_seeks_once_on_release() {
+    let now = t0();
+    let mut m = Model::new(config_all(), now);
+    m.handle_event(
+        &PlatformEvent::Media(MediaEvent::TrackChanged(track("A", 200, true))),
+        now,
+    );
+    for v in [0.2, 0.4, 0.6] {
+        let fx = m.drag_slider(SliderTarget::Seek, v, now);
+        assert!(
+            !fx.iter().any(|e| matches!(e, Effect::Transport(_))),
+            "no seek while dragging: {fx:?}"
+        );
+    }
+    m.action(Action::SelectTab(Tab::Media), now);
+    match m.view(now).body {
+        Body::Media(mv) => {
+            assert!(
+                (mv.fraction.unwrap_or(0.0) - 0.6).abs() < 1e-6,
+                "preview shown"
+            );
+            assert_eq!(mv.times.map(|t| t.0), Some("2:00".to_string()));
+        }
+        other => panic!("{other:?}"),
+    }
+    let fx = m.end_drag(SliderTarget::Seek, 0.75, now);
+    assert_eq!(
+        fx.iter()
+            .filter(|e| matches!(e, Effect::Transport(_)))
+            .collect::<Vec<_>>(),
+        vec![&Effect::Transport(TransportCommand::SeekTo(
+            Duration::from_secs(150)
+        ))]
+    );
+}
+
+#[test]
+fn dragging_a_volume_slider_applies_live() {
+    let now = t0();
+    let mut m = Model::new(config_all(), now);
+    m.sessions_captured(vec![AudioSession {
+        id: "spotify".into(),
+        name: "Spotify".into(),
+        volume: 0.8,
+        muted: false,
+    }]);
+    let fx = m.drag_slider(SliderTarget::Volume("spotify".into()), 0.3, now);
+    assert!(fx.contains(&Effect::SetVolume {
+        id: "spotify".into(),
+        volume: 0.3
+    }));
+    let fx = m.end_drag(SliderTarget::Volume("spotify".into()), 0.35, now);
+    assert!(fx.contains(&Effect::SetVolume {
+        id: "spotify".into(),
+        volume: 0.35
+    }));
+}
+
+#[test]
+fn system_volume_is_the_first_mixer_row_with_a_speaker_icon() {
+    use perch_core::platform::SYSTEM_VOLUME_ID;
+    use perch_core::view::{RowKind, RowLeading};
+    let now = t0();
+    let mut m = Model::new(config_all(), now);
+    let s = |id: &str, name: &str, v: f32| AudioSession {
+        id: id.into(),
+        name: name.into(),
+        volume: v,
+        muted: false,
+    };
+    m.sessions_captured(vec![
+        s("chrome", "Chrome", 1.0),
+        s(SYSTEM_VOLUME_ID, "System volume", 0.3),
+        s("aimp", "AIMP", 0.5),
+    ]);
+    m.action(Action::SelectTab(Tab::Mixer), now);
+    let Body::Sliders { rows, .. } = m.view(now).body else {
+        panic!("mixer body")
+    };
+    assert_eq!(rows[0].label, "System volume");
+    assert!((rows[0].value - 0.3).abs() < 1e-6);
+    assert_eq!(rows[0].leading, RowLeading::Kind(RowKind::Speaker));
+    assert_eq!(rows[1].label, "AIMP", "apps follow, sorted by name");
+}
+
+#[test]
+fn the_collapsed_pill_shows_the_current_lyric_line_live() {
+    let now = t0();
+    let mut m = Model::new(config_all(), now);
+    let fx = m.handle_event(
+        &PlatformEvent::Media(MediaEvent::TrackChanged(track("A", 100, true))),
+        now,
+    );
+    let key = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::FetchLyrics(r) => Some(r.key.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    m.lyrics_loaded(&key, Some("[00:00.50]first line\n[00:03.00]second line\n"));
+    let text = |m: &Model| match m.collapsed() {
+        CollapsedView::Pill { text, .. } => text,
+        other => panic!("{other:?}"),
+    };
+    let at = now.plus(Duration::from_secs(1));
+    m.tick(at);
+    assert_eq!(text(&m), "first line");
+    assert!(m.pill_shows_lyric());
+    // Collapsed, the loop still wakes for the next line (and only then).
+    let next = m.next_deadline(at, false).unwrap_or_default();
+    assert!(
+        next > Duration::from_millis(1500) && next <= Duration::from_secs(2),
+        "next line at 3 s: {next:?}"
+    );
+    let fx = m.tick(now.plus(Duration::from_millis(3_100)));
+    assert!(fx.contains(&Effect::Redraw), "a new line redraws the pill");
+    assert_eq!(text(&m), "second line");
+    // Paused: back to the track title, no lyric wake-ups.
+    m.handle_event(
+        &PlatformEvent::Media(MediaEvent::PlaybackChanged(false)),
+        now.plus(Duration::from_secs(4)),
+    );
+    m.tick(now.plus(Duration::from_secs(4)));
+    assert!(!m.pill_shows_lyric());
+}
+
+fn foreign(app: &str, title: &str, body: &str) -> PlatformEvent {
+    PlatformEvent::ForeignNotification(perch_core::platform::ForeignNotification {
+        app: app.into(),
+        title: title.into(),
+        body: body.into(),
+    })
+}
+
+#[test]
+fn other_apps_notifications_become_banners_when_mirroring_is_on() {
+    if !perch_app::features::Feature::NotificationMirror.compiled_in() {
+        return; // Windows-only feature (UserNotificationListener).
+    }
+    let now = t0();
+    let mut cfg = config_all();
+    cfg.features.notification_mirror = true;
+    let mut m = Model::new(cfg.clone(), now);
+    m.set_panel_state(false, true, now);
+    let fx = m.handle_event(&foreign("WhatsApp", "Ann", "See you at 8"), now);
+    assert!(fx.contains(&Effect::Redraw));
+    let b = m.view(now).banner.unwrap_or_else(|| panic!("a banner"));
+    assert_eq!(b.app.as_deref(), Some("WhatsApp"));
+    assert_eq!((b.title.as_str(), b.body.as_str()), ("Ann", "See you at 8"));
+    assert!(
+        !fx.iter().any(|e| matches!(e, Effect::Notify { .. })),
+        "never echoed back as a system toast"
+    );
+
+    // Off (the default), or with in-notch notifications off: nothing.
+    for c in [config_all(), {
+        let mut c = cfg.clone();
+        c.notifications.in_notch = false;
+        c
+    }] {
+        let mut m = Model::new(c, now);
+        m.set_panel_state(false, true, now);
+        m.handle_event(&foreign("WhatsApp", "Ann", "hi"), now);
+        assert!(m.view(now).banner.is_none());
+    }
+}

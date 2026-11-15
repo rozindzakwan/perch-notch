@@ -40,6 +40,8 @@ pub enum Feature {
     CameraMirror,
     /// Read-only mail summary (network, opt-in).
     Mail,
+    /// Other apps' notifications shown in the notch.
+    NotificationMirror,
 }
 
 impl Feature {
@@ -59,6 +61,7 @@ impl Feature {
         Feature::Screenshot,
         Feature::CameraMirror,
         Feature::Mail,
+        Feature::NotificationMirror,
     ];
 
     /// Label for the tray menu and the settings window.
@@ -78,6 +81,7 @@ impl Feature {
             Feature::Screenshot => "Screenshot",
             Feature::CameraMirror => "Camera mirror",
             Feature::Mail => "Mail (read-only)",
+            Feature::NotificationMirror => "Notifications from other apps",
         }
     }
 
@@ -107,6 +111,8 @@ impl Feature {
             Feature::Screenshot => cfg!(feature = "screenshot"),
             Feature::CameraMirror => cfg!(feature = "camera"),
             Feature::Mail => cfg!(feature = "mail"),
+            // Windows only for now (UserNotificationListener).
+            Feature::NotificationMirror => cfg!(windows),
             // The mixer needs no extra crates on either OS.
             Feature::VolumeMixer => true,
         }
@@ -130,6 +136,7 @@ impl Feature {
             Feature::Screenshot => f.screenshot,
             Feature::CameraMirror => f.camera_mirror,
             Feature::Mail => f.mail,
+            Feature::NotificationMirror => f.notification_mirror,
         }
     }
 }

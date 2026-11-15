@@ -77,6 +77,41 @@ fn pulse_mixer_lists_and_controls_app_streams() {
     });
     assert!(mixer.set_volume("no-such-app", 0.5).is_err());
 
+    // The output device's main volume is the first row and follows changes
+    // made elsewhere (as with the volume keys), announced as an event.
+    use perch_core::platform::SYSTEM_VOLUME_ID;
+    wait_until(&mut mixer, "the System row first", |s| {
+        s.first().is_some_and(|x| x.id == SYSTEM_VOLUME_ID)
+    });
+    mixer
+        .set_volume(SYSTEM_VOLUME_ID, 0.40)
+        .unwrap_or_else(|e| panic!("{e}"));
+    wait_until(&mut mixer, "system volume 40%", |s| {
+        s.iter()
+            .any(|x| x.id == SYSTEM_VOLUME_ID && (x.volume - 0.40).abs() < 0.02)
+    });
+    while rx.try_recv().is_ok() {}
+    let status = Command::new("pactl")
+        .args(["set-sink-volume", "@DEFAULT_SINK@", "70%"])
+        .status()
+        .unwrap_or_else(|e| panic!("pactl: {e}"));
+    assert!(status.success());
+    rx.recv_timeout(Duration::from_secs(10))
+        .unwrap_or_else(|e| panic!("no event for an outside volume change: {e}"));
+    wait_until(&mut mixer, "system volume 70% from pactl", |s| {
+        s.iter()
+            .any(|x| x.id == SYSTEM_VOLUME_ID && (x.volume - 0.70).abs() < 0.02)
+    });
+    mixer
+        .set_mute(SYSTEM_VOLUME_ID, true)
+        .unwrap_or_else(|e| panic!("{e}"));
+    wait_until(&mut mixer, "system muted", |s| {
+        s.iter().any(|x| x.id == SYSTEM_VOLUME_ID && x.muted)
+    });
+    mixer
+        .set_mute(SYSTEM_VOLUME_ID, false)
+        .unwrap_or_else(|e| panic!("{e}"));
+
     let _ = tone.kill();
     let _ = tone.wait();
     wait_until(&mut mixer, "the stream to go away", |s| {

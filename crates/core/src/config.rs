@@ -140,6 +140,8 @@ pub struct FeatureFlags {
     pub camera_mirror: bool,
     /// Read-only mail summary (network, opt-in).
     pub mail: bool,
+    /// Show other apps' notifications in the notch (opt-in: reads their text).
+    pub notification_mirror: bool,
 }
 
 impl Default for FeatureFlags {
@@ -159,6 +161,7 @@ impl Default for FeatureFlags {
             screenshot: false,
             camera_mirror: false,
             mail: false,
+            notification_mirror: false,
         }
     }
 }

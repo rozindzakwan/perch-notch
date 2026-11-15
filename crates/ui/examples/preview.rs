@@ -244,20 +244,21 @@ fn main() {
     let ph = (32.0 * scale) as u32;
     let f = Frame::new(pw, ph, scale, pal);
     save("pill", pw, ph, &f, &pill, &mut r);
-    // A new-mail banner.
+    // A mirrored notification from another app.
     let banner = PanelView {
         banner: Some(perch_core::view::BannerView {
-            leading: perch_core::view::RowLeading::Avatar {
-                initials: "BB".into(),
-                seed: perch_core::view::seed("Build Bot"),
+            leading: perch_core::view::RowLeading::Disc {
+                initials: "WA".into(),
+                rgb: [0x25, 0xD3, 0x66],
             },
-            title: "Build Bot".into(),
-            body: "Nightly build passed".into(),
-            tab: Some(Tab::Mail),
+            title: "Ann Lee".into(),
+            body: "See you at eight at the usual place, and please bring the charger and the blue folder".into(),
+            tab: None,
+            app: Some("WhatsApp".into()),
         }),
         ..PanelView::default()
     };
-    let (bw, bh) = ((300.0 * scale) as u32, (56.0 * scale) as u32);
+    let (bw, bh) = ((360.0 * scale) as u32, (88.0 * scale) as u32);
     let f = Frame::new(bw, bh, scale, pal);
     save("banner", bw, bh, &f, &banner, &mut r);
     // The settings window.

@@ -167,7 +167,14 @@ impl Renderer {
         let banner = view.banner.as_ref().filter(|_| !open);
         if let Some(b) = banner {
             // The pill has stretched into a notification banner.
-            glass::banner(&mut ctx, panel, &leading_of(&b.leading), &b.title, &b.body);
+            glass::banner(
+                &mut ctx,
+                panel,
+                &leading_of(&b.leading),
+                b.app.as_deref(),
+                &b.title,
+                &b.body,
+            );
             ctx.button(panel, Action::BannerOpen);
             let hits = std::mem::take(&mut ctx.hits);
             return hits;
@@ -755,6 +762,7 @@ fn kind_icon(k: perch_core::view::RowKind) -> Icon {
         RowKind::Warning => Icon::Warning,
         RowKind::Sound => Icon::Waves,
         RowKind::Mail => Icon::Mail,
+        RowKind::Speaker => Icon::Speaker,
     }
 }
 

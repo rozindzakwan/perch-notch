@@ -1,4 +1,5 @@
-//! Per-app volume through PulseAudio sink inputs (works unchanged on
+//! Per-app volume through PulseAudio sink inputs, plus the default output's
+//! main volume as the System row (works unchanged on
 //! PipeWire's `pipewire-pulse`, the default on Mint 22).
 //!
 //! A threaded PulseAudio mainloop runs the protocol; a subscription to
@@ -17,7 +18,10 @@ use libpulse_binding::mainloop::threaded::Mainloop;
 use libpulse_binding::proplist::{properties, Proplist};
 use libpulse_binding::volume::{ChannelVolumes, Volume};
 use perch_core::error::{Error, Result};
-use perch_core::platform::{AudioMixer, AudioSession, EventSink, PlatformEvent};
+use perch_core::platform::{AudioMixer, AudioSession, EventSink, PlatformEvent, SYSTEM_VOLUME_ID};
+
+/// PulseAudio's name for whatever the default output currently is.
+const DEFAULT_SINK: &str = "@DEFAULT_SINK@";
 
 const TIMEOUT: Duration = Duration::from_secs(3);
 
@@ -89,11 +93,19 @@ impl PulseMixer {
         ml.lock();
         ctx.set_state_callback(None);
         ctx.set_subscribe_callback(Some(Box::new(move |facility, _op, _idx| {
-            if facility == Some(Facility::SinkInput) {
+            // Streams, the output device (main volume) and the server (a new
+            // default output) all change what the mixer shows.
+            if matches!(
+                facility,
+                Some(Facility::SinkInput | Facility::Sink | Facility::Server)
+            ) {
                 sink(PlatformEvent::AudioSessionsChanged);
             }
         })));
-        let _op = ctx.subscribe(InterestMaskSet::SINK_INPUT, |_| {});
+        let _op = ctx.subscribe(
+            InterestMaskSet::SINK_INPUT | InterestMaskSet::SINK | InterestMaskSet::SERVER,
+            |_| {},
+        );
         ml.unlock();
         Ok(Self {
             ml,
@@ -139,6 +151,27 @@ impl PulseMixer {
         }
         self.last = out.clone();
         Ok(out)
+    }
+
+    /// The default output's main volume, mute state and channel count.
+    fn device(&mut self) -> Option<(f32, bool, u8)> {
+        let (tx, rx) = channel::<Option<(f32, bool, u8)>>();
+        self.ml.lock();
+        let _op = self
+            .ctx
+            .introspect()
+            .get_sink_info_by_name(DEFAULT_SINK, move |res| match res {
+                ListResult::Item(info) => {
+                    let avg = info.volume.avg().0 as f32 / Volume::NORMAL.0 as f32;
+                    let v = if avg.is_finite() { avg } else { 0.0 };
+                    let _ = tx.send(Some((v, info.mute, info.volume.len())));
+                }
+                ListResult::End | ListResult::Error => {
+                    let _ = tx.send(None);
+                }
+            });
+        self.ml.unlock();
+        rx.recv_timeout(TIMEOUT).ok().flatten()
     }
 
     fn indices(&mut self, id: &str) -> Result<Vec<(u32, u8)>> {
@@ -191,11 +224,39 @@ fn group(streams: &[Stream]) -> Vec<AudioSession> {
 impl AudioMixer for PulseMixer {
     fn sessions(&mut self) -> Result<Vec<AudioSession>> {
         let streams = self.streams()?;
-        Ok(group(&streams))
+        let mut out = Vec::new();
+        if let Some((volume, muted, _)) = self.device() {
+            out.push(AudioSession {
+                id: SYSTEM_VOLUME_ID.to_string(),
+                name: "System volume".to_string(),
+                volume: volume.clamp(0.0, 1.0),
+                muted,
+            });
+        }
+        out.extend(group(&streams));
+        Ok(out)
     }
 
     fn set_volume(&mut self, id: &str, volume: f32) -> Result<()> {
         let v = volume.clamp(0.0, 1.0);
+        if id == SYSTEM_VOLUME_ID {
+            let channels = self
+                .device()
+                .map(|(_, _, c)| c.max(1))
+                .ok_or_else(|| Error::backend("no default output"))?;
+            let mut cv = ChannelVolumes::default();
+            cv.set(
+                channels,
+                Volume((Volume::NORMAL.0 as f32 * v).round() as u32),
+            );
+            self.ml.lock();
+            let _ = self
+                .ctx
+                .introspect()
+                .set_sink_volume_by_name(DEFAULT_SINK, &cv, None);
+            self.ml.unlock();
+            return Ok(());
+        }
         let targets = self.indices(id)?;
         self.ml.lock();
         let mut introspect = self.ctx.introspect();
@@ -212,6 +273,15 @@ impl AudioMixer for PulseMixer {
     }
 
     fn set_mute(&mut self, id: &str, muted: bool) -> Result<()> {
+        if id == SYSTEM_VOLUME_ID {
+            self.ml.lock();
+            let _ = self
+                .ctx
+                .introspect()
+                .set_sink_mute_by_name(DEFAULT_SINK, muted, None);
+            self.ml.unlock();
+            return Ok(());
+        }
         let targets = self.indices(id)?;
         self.ml.lock();
         let mut introspect = self.ctx.introspect();

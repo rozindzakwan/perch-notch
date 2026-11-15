@@ -36,6 +36,9 @@ pub struct Services {
     pub media: Option<Box<dyn MediaControl>>,
     /// Per-app volume (only while the mixer is live).
     pub mixer: Option<Box<dyn AudioMixer>>,
+    /// Other apps' notifications (only while mirroring is live); dropping it
+    /// stops the worker.
+    notification_mirror: Option<Box<dyn std::any::Any>>,
     config_watcher: Option<notify::RecommendedWatcher>,
     os: os::OsServices,
 }
@@ -55,6 +58,7 @@ impl Services {
             clipboard: None,
             media: None,
             mixer: None,
+            notification_mirror: None,
             config_watcher: None,
             os: parts.os,
         }
@@ -182,6 +186,16 @@ impl Services {
         } else if !want_mixer {
             self.mixer = None;
         }
+
+        let want_mirror = features.is_active(Feature::NotificationMirror);
+        if want_mirror && self.notification_mirror.is_none() {
+            match os::notification_mirror(self.sink.clone()) {
+                Ok(m) => self.notification_mirror = Some(m),
+                Err(e) => log::warn!("notifications from other apps unavailable: {e}"),
+            }
+        } else if !want_mirror {
+            self.notification_mirror = None;
+        }
     }
 }
 
@@ -283,6 +297,11 @@ mod os {
 
     pub fn mixer(sink: EventSink) -> Result<Box<dyn AudioMixer>> {
         crate::backends::mixer(sink)
+    }
+
+    pub fn notification_mirror(sink: EventSink) -> Result<Box<dyn std::any::Any>> {
+        let m = perch_platform_windows::notifications::NotificationMirror::start(sink)?;
+        Ok(Box::new(m))
     }
 
     impl OsServices {
@@ -390,6 +409,13 @@ mod os {
 
     pub fn mixer(sink: EventSink) -> Result<Box<dyn AudioMixer>> {
         crate::backends::mixer(sink)
+    }
+
+    pub fn notification_mirror(_sink: EventSink) -> Result<Box<dyn std::any::Any>> {
+        Err(perch_core::error::Error::unavailable(
+            "notifications",
+            "mirroring other apps' notifications is Windows-only for now",
+        ))
     }
 
     impl OsServices {

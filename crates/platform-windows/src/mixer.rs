@@ -10,14 +10,18 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 
 use perch_core::error::{Error, Result};
-use perch_core::platform::{AudioMixer, AudioSession, EventSink, PlatformEvent};
+use perch_core::platform::{AudioMixer, AudioSession, EventSink, PlatformEvent, SYSTEM_VOLUME_ID};
 use windows::core::{implement, Interface, GUID, PCWSTR};
 use windows::Win32::Foundation::{BOOL, S_OK};
+use windows::Win32::Media::Audio::Endpoints::{
+    IAudioEndpointVolume, IAudioEndpointVolumeCallback, IAudioEndpointVolumeCallback_Impl,
+};
 use windows::Win32::Media::Audio::{
     eMultimedia, eRender, AudioSessionDisconnectReason, AudioSessionState,
     AudioSessionStateExpired, IAudioSessionControl, IAudioSessionControl2, IAudioSessionEvents,
     IAudioSessionEvents_Impl, IAudioSessionManager2, IAudioSessionNotification,
     IAudioSessionNotification_Impl, IMMDeviceEnumerator, ISimpleAudioVolume, MMDeviceEnumerator,
+    AUDIO_VOLUME_NOTIFICATION_DATA,
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
@@ -29,6 +33,25 @@ const PERCH_CONTEXT: GUID = GUID::from_u128(0x5045_5243_4800_4d49_5845_5200_0000
 #[implement(IAudioSessionNotification)]
 struct NewSessions {
     sink: EventSink,
+}
+
+/// The device's main volume changed (taskbar flyout, volume keys, another
+/// app): re-read the list so the System row follows.
+#[implement(IAudioEndpointVolumeCallback)]
+struct DeviceVolume {
+    sink: EventSink,
+}
+
+impl IAudioEndpointVolumeCallback_Impl for DeviceVolume_Impl {
+    fn OnNotify(&self, data: *mut AUDIO_VOLUME_NOTIFICATION_DATA) -> windows::core::Result<()> {
+        // SAFETY: `data` is null or points at the notification data, valid for
+        // the duration of the callback.
+        let ours = !data.is_null() && unsafe { (*data).guidEventContext } == PERCH_CONTEXT;
+        if !ours {
+            (self.sink)(PlatformEvent::AudioSessionsChanged);
+        }
+        Ok(())
+    }
 }
 
 impl IAudioSessionNotification_Impl for NewSessions_Impl {
@@ -96,6 +119,8 @@ pub struct WasapiMixer {
     sink: EventSink,
     manager: IAudioSessionManager2,
     notification: IAudioSessionNotification,
+    /// The device's main volume (the System row) and its change callback.
+    endpoint: Option<(IAudioEndpointVolume, IAudioEndpointVolumeCallback)>,
     registered: Mutex<Vec<(String, IAudioSessionControl, IAudioSessionEvents)>>,
 }
 
@@ -109,16 +134,30 @@ impl WasapiMixer {
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
         // SAFETY: COM is initialised on this (UI) thread by winit/OLE; the
         // enumerator and manager are plain COM interfaces we own.
-        let manager: IAudioSessionManager2 = unsafe {
+        let (manager, endpoint): (IAudioSessionManager2, Option<IAudioEndpointVolume>) = unsafe {
             let en: IMMDeviceEnumerator =
                 CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
                     .map_err(|e| Error::unavailable("mixer", format!("device enumerator: {e}")))?;
             let dev = en
                 .GetDefaultAudioEndpoint(eRender, eMultimedia)
                 .map_err(|e| Error::unavailable("mixer", format!("no output device: {e}")))?;
-            dev.Activate(CLSCTX_ALL, None)
-                .map_err(|e| Error::unavailable("mixer", format!("session manager: {e}")))?
+            let manager = dev
+                .Activate(CLSCTX_ALL, None)
+                .map_err(|e| Error::unavailable("mixer", format!("session manager: {e}")))?;
+            (manager, dev.Activate(CLSCTX_ALL, None).ok())
         };
+        // The main volume is optional: without it the app rows still work.
+        let endpoint = endpoint.and_then(|ep| {
+            let cb: IAudioEndpointVolumeCallback = DeviceVolume { sink: sink.clone() }.into();
+            // SAFETY: registering our own COM object; unregistered in Drop.
+            match unsafe { ep.RegisterControlChangeNotify(&cb) } {
+                Ok(()) => Some((ep, cb)),
+                Err(e) => {
+                    log::warn!("device volume notifications: {e}");
+                    None
+                }
+            }
+        });
         // Documented quirk: enumerate once before registering, or the
         // session-created notification never fires.
         // SAFETY: valid manager interface.
@@ -131,6 +170,7 @@ impl WasapiMixer {
             sink,
             manager,
             notification,
+            endpoint,
             registered: Mutex::new(Vec::new()),
         };
         let _ = me.entries();
@@ -244,6 +284,9 @@ impl Drop for WasapiMixer {
             let _ = self
                 .manager
                 .UnregisterSessionNotification(&self.notification);
+            if let Some((ep, cb)) = &self.endpoint {
+                let _ = ep.UnregisterControlChangeNotify(cb);
+            }
             if let Ok(mut reg) = self.registered.lock() {
                 for (_, control, events) in reg.drain(..) {
                     let _ = control.UnregisterAudioSessionNotification(&events);
@@ -256,6 +299,21 @@ impl Drop for WasapiMixer {
 impl AudioMixer for WasapiMixer {
     fn sessions(&mut self) -> Result<Vec<AudioSession>> {
         let mut grouped: Vec<AudioSession> = Vec::new();
+        if let Some((ep, _)) = &self.endpoint {
+            // SAFETY: reading the level and mute state of a live endpoint.
+            let (vol, muted) = unsafe {
+                (
+                    ep.GetMasterVolumeLevelScalar().unwrap_or(1.0),
+                    ep.GetMute().map(|b| b.as_bool()).unwrap_or(false),
+                )
+            };
+            grouped.push(AudioSession {
+                id: SYSTEM_VOLUME_ID.to_string(),
+                name: "System volume".to_string(),
+                volume: vol,
+                muted,
+            });
+        }
         for e in self.entries()? {
             // SAFETY: reading volume/mute from a live session.
             let (vol, muted) = unsafe {
@@ -283,11 +341,29 @@ impl AudioMixer for WasapiMixer {
 
     fn set_volume(&mut self, id: &str, volume: f32) -> Result<()> {
         let v = volume.clamp(0.0, 1.0);
+        if id == SYSTEM_VOLUME_ID {
+            let (ep, _) = self
+                .endpoint
+                .as_ref()
+                .ok_or_else(|| Error::backend("no device volume control"))?;
+            // SAFETY: setting the level of a live endpoint, tagged as ours.
+            return unsafe { ep.SetMasterVolumeLevelScalar(v, &PERCH_CONTEXT) }
+                .map_err(|e| Error::backend(format!("device volume: {e}")));
+        }
         // SAFETY: setting volume on a live session with our context GUID.
         self.for_app(id, |s| unsafe { s.SetMasterVolume(v, &PERCH_CONTEXT) })
     }
 
     fn set_mute(&mut self, id: &str, muted: bool) -> Result<()> {
+        if id == SYSTEM_VOLUME_ID {
+            let (ep, _) = self
+                .endpoint
+                .as_ref()
+                .ok_or_else(|| Error::backend("no device volume control"))?;
+            // SAFETY: muting a live endpoint, tagged as ours.
+            return unsafe { ep.SetMute(muted, &PERCH_CONTEXT) }
+                .map_err(|e| Error::backend(format!("device mute: {e}")));
+        }
         // SAFETY: as above.
         self.for_app(id, |s| unsafe { s.SetMute(muted, &PERCH_CONTEXT) })
     }

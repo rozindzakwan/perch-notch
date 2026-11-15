@@ -11,6 +11,7 @@ fn banner(title: &str, tab: Option<Tab>) -> BannerView {
         title: title.into(),
         body: String::new(),
         tab,
+        app: None,
     }
 }
 

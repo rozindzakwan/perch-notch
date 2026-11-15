@@ -399,3 +399,35 @@ building a 380×300 shadow at 2× takes < 15 ms once, < 2 ms cached. Idle
 memory is where it was before the redesign (Windows: ~24 MB private);
 `perch.exe` grew from 8.6 to 9.2 MB. Acrylic blur was evaluated and not used
 (ADR-018).
+
+## ADR-020: Mirroring other apps' notifications (Windows)
+
+The user wanted other apps' notifications (WhatsApp, Teams, Discord...) in
+the notch, not only Perch's own banners. A spike
+(`crates/platform-windows/examples/notif_spike.rs`, which prints only app
+names and line counts) found:
+
+- `UserNotificationListener` **does** grant an unpackaged Win32 app access
+  (status Allowed) and lists the action center's toasts with app name and
+  text.
+- Its `NotificationChanged` event fails with "Element not found" without
+  package identity. Getting identity means a signed sparse MSIX package,
+  which needs a trusted certificate (admin) or Developer Mode.
+- The notification store (`wpndatabase.db-wal`) is written through a memory
+  map, so directory-change notifications never fire for it, even though its
+  size and timestamp change with every toast. A WinEvent hook saw no toast
+  window either, and toasts suppressed by Do Not Disturb never show one.
+
+**Decision.** While the feature is on (it is off by default), a worker thread
+compares the store file's size and timestamp once a second (microseconds),
+and reads the list only when they changed. Reading the list costs about
+37 ms; reading it unconditionally every 2 s used ~2 % of a core, and the
+gated check measures 16 ms of CPU per 20 s. Only notifications not seen
+before are read in full, and the first snapshot is a baseline, so turning the
+feature on doesn't replay the action center. A banner appears 0.5–1.1 s after
+the toast. Perch's own toasts are skipped. The text is held in memory for the
+banner only, never stored or logged.
+
+This is the one feature that checks on a timer. It's opt-in, and the check
+is a file stat. Linux (watching `org.freedesktop.Notifications` with a D-Bus
+monitor) is not implemented yet.

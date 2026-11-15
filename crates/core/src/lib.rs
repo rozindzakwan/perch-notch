@@ -15,6 +15,7 @@ pub mod hotkey;
 pub mod lrc;
 pub mod mail;
 pub mod media;
+pub mod mirror;
 pub mod noise;
 pub mod notch;
 pub mod palette;

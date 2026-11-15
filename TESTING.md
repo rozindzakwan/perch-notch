@@ -210,6 +210,24 @@ itself crashed at the very end because it was edited while running; the CSV
 was complete and re-scored with `--summarize`.) Evidence:
 `artifacts/linux/soak-linux.{csv,md}`.
 
+## 3a. Sliders, system volume, lyrics in the pill, other apps' notifications
+
+| Test | Where | Result |
+|---|---|---|
+| `slider_at` (core): the slider under the pointer, values clamp when dragged past either end | both | passed |
+| model: dragging the seek bar previews position and time, and seeks **once** on release; volume sliders apply live | both | passed |
+| model: the System volume row comes first with a speaker icon | both | passed |
+| `pulse` (container): System row first, set to 40 %, **follows a `pactl` change made elsewhere (announced as an event)**, mutes | container | passed |
+| model: the collapsed pill shows the current lyric line, wakes only at the next line, and returns to the title when paused | both | passed |
+| core `SeenNotifications`: first snapshot quiet, later only new ids | both | passed |
+| model: another app's notification becomes a half-open banner with the app as caption, never echoed as a toast; nothing when the feature or in-notch notifications are off | Windows (feature is Windows-only) | passed |
+| render: the banner wraps the text onto a second line and draws the app caption | both | passed |
+| **Real app, Windows:** mirror on, a test toast from PowerShell → banner after **0.5 s / 1.1 s**; CPU with nothing arriving **16 ms per 20 s** (reading the list unconditionally every 2 s cost 375–547 ms); mixer rows start with "System volume" | Windows | passed |
+
+Not automated: dragging with a real mouse, and the System row following the
+Windows volume keys (it uses the same endpoint-volume callback that Windows'
+own flyout uses; on Linux the `pactl` check covers the equivalent path).
+
 ## 3b. Mail (read-only IMAP)
 
 No test signs into a real account. They run against a scripted in-process

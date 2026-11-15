@@ -176,3 +176,33 @@ proptest! {
         prop_assert!(r.y + r.h as i32 <= work.y + work.h as i32);
     }
 }
+
+#[test]
+fn a_slider_under_the_pointer_can_be_dragged_past_its_ends() {
+    use perch_core::view::{slider_at, Action, Hit, HitKind, SliderTarget};
+    let hits = vec![
+        Hit {
+            x: 10.0,
+            y: 10.0,
+            w: 100.0,
+            h: 10.0,
+            kind: HitKind::Slider(SliderTarget::Seek),
+        },
+        Hit {
+            x: 120.0,
+            y: 10.0,
+            w: 20.0,
+            h: 10.0,
+            kind: HitKind::Button(Action::OpenSettings),
+        },
+    ];
+    let drag = slider_at(&hits, 35.0, 15.0).unwrap_or_else(|| panic!("a slider"));
+    assert_eq!(drag.target, SliderTarget::Seek);
+    assert!((drag.value_at(60.0) - 0.5).abs() < 1e-6);
+    assert_eq!(drag.value_at(-50.0), 0.0, "dragging past the start clamps");
+    assert_eq!(drag.value_at(500.0), 1.0, "and past the end");
+    assert!(
+        slider_at(&hits, 125.0, 15.0).is_none(),
+        "a button is not a slider"
+    );
+}
