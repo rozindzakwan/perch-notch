@@ -82,6 +82,25 @@ pub struct ForeignNotification {
     pub title: String,
     /// The rest of the text.
     pub body: String,
+    /// The app's icon as an encoded image (PNG, ...), if the OS gave one.
+    pub icon: Option<Vec<u8>>,
+    /// What [`Opener::launch_app`] needs to bring the app up: the Windows
+    /// AppUserModelID, or the Linux `.desktop` entry name.
+    pub launch: Option<String>,
+}
+
+/// Whether an app id from another app's notification is safe to hand to the
+/// shell: a plain name (letters, digits, `.`, `_`, `-`, `!`, `{}`, `\`,
+/// spaces), never a path that climbs out (`..`), an option (`-x`) or a
+/// command. Pure.
+pub fn launchable_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 512
+        && !id.starts_with('-')
+        && !id.contains("..")
+        && id.chars().all(|c| {
+            c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '!' | '{' | '}' | '\\' | ' ')
+        })
 }
 
 /// Anything the platform layer can wake the app up for.
@@ -247,6 +266,15 @@ pub trait IdleSource {
 pub trait Opener {
     /// Open a file or folder.
     fn open(&self, path: &std::path::Path) -> Result<()>;
+
+    /// Bring up an installed app by the id a mirrored notification carried
+    /// ([`ForeignNotification::launch`]).
+    fn launch_app(&self, id: &str) -> Result<()> {
+        Err(crate::error::Error::unavailable(
+            "launch",
+            format!("cannot open {id} here"),
+        ))
+    }
 }
 
 /// Enumerates monitors and picks the one the notch should live on.
@@ -330,4 +358,33 @@ pub trait SingleInstance {
 pub trait EventSource {
     /// Take every queued event.
     fn drain_events(&mut self) -> Vec<PlatformEvent>;
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::launchable_id;
+
+    #[test]
+    fn only_plain_app_ids_are_launchable() {
+        for ok in [
+            "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App",
+            "Microsoft.Windows.Explorer",
+            r"{6D809377-6AF0-444B-8957-A3773F02200E}\Mozilla Firefox\firefox.exe",
+            "org.telegram.desktop",
+            "thunderbird",
+        ] {
+            assert!(launchable_id(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "--help",
+            r"..\..\evil",
+            "a;rm -rf ~",
+            "x\"y",
+            "/usr/bin/sh",
+            "a\nb",
+        ] {
+            assert!(!launchable_id(bad), "{bad:?}");
+        }
+    }
 }

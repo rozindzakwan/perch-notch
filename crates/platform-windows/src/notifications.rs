@@ -11,6 +11,7 @@
 //! ([`perch_core::mirror::SeenNotifications`]). The text is handed to the app
 //! for the banner and never stored or logged.
 
+use std::collections::HashMap;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -18,6 +19,7 @@ use std::time::Duration;
 use perch_core::error::{Error, Result};
 use perch_core::mirror::SeenNotifications;
 use perch_core::platform::{EventSink, ForeignNotification, PlatformEvent};
+use windows::Storage::Streams::DataReader;
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 use windows::UI::Notifications::Management::{
     UserNotificationListener, UserNotificationListenerAccessStatus,
@@ -58,6 +60,7 @@ impl NotificationMirror {
                     }
                 };
                 let mut seen = SeenNotifications::default();
+                let mut logos = HashMap::new();
                 let store = store_file();
                 let mut last_stamp = None;
                 loop {
@@ -82,7 +85,7 @@ impl NotificationMirror {
                                 let Some((_, n)) = list.iter().find(|(i, _)| *i == id) else {
                                     continue;
                                 };
-                                if let Some(f) = describe(n) {
+                                if let Some(f) = describe(n, &mut logos) {
                                     if f.app != OWN_APP {
                                         sink(PlatformEvent::ForeignNotification(f));
                                     }
@@ -171,13 +174,52 @@ fn snapshot(l: &UserNotificationListener) -> windows::core::Result<Vec<(u32, Use
         .collect())
 }
 
-fn describe(n: &UserNotification) -> Option<ForeignNotification> {
-    let app = n
-        .AppInfo()
-        .and_then(|a| a.DisplayInfo())
-        .and_then(|d| d.DisplayName())
+/// Largest app logo read (bytes).
+const MAX_LOGO: u32 = 1024 * 1024;
+
+/// The app's logo as encoded image bytes, at about the banner's size.
+fn logo(info: &windows::ApplicationModel::AppInfo) -> Option<Vec<u8>> {
+    let size = windows::Foundation::Size {
+        Width: 64.0,
+        Height: 64.0,
+    };
+    let stream = info
+        .DisplayInfo()
+        .ok()?
+        .GetLogo(size)
+        .ok()?
+        .OpenReadAsync()
+        .ok()?
+        .get()
+        .ok()?;
+    let len = u32::try_from(stream.Size().ok()?).ok()?;
+    if len == 0 || len > MAX_LOGO {
+        return None;
+    }
+    let reader = DataReader::CreateDataReader(&stream).ok()?;
+    reader.LoadAsync(len).ok()?.get().ok()?;
+    let mut buf = vec![0u8; len as usize];
+    reader.ReadBytes(&mut buf).ok()?;
+    Some(buf)
+}
+
+fn describe(
+    n: &UserNotification,
+    logos: &mut HashMap<String, Option<Vec<u8>>>,
+) -> Option<ForeignNotification> {
+    let info = n.AppInfo().ok();
+    let app = info
+        .as_ref()
+        .and_then(|a| a.DisplayInfo().ok())
+        .and_then(|d| d.DisplayName().ok())
         .map(|s| s.to_string())
         .unwrap_or_default();
+    // The id `shell:AppsFolder\<id>` opens; also the logo cache key.
+    let launch = info
+        .as_ref()
+        .and_then(|a| a.AppUserModelId().ok())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty());
     let texts: Vec<String> = n
         .Notification()
         .and_then(|t| t.Visual())
@@ -192,7 +234,19 @@ fn describe(n: &UserNotification) -> Option<ForeignNotification> {
         })
         .unwrap_or_default();
     let (title, body) = split_text(&app, &texts)?;
-    Some(ForeignNotification { app, title, body })
+    // Logos are read once per app (each read opens a stream).
+    let icon = match (&info, &launch) {
+        (Some(i), Some(id)) => logos.entry(id.clone()).or_insert_with(|| logo(i)).clone(),
+        (Some(i), None) => logo(i),
+        _ => None,
+    };
+    Some(ForeignNotification {
+        app,
+        title,
+        body,
+        icon,
+        launch,
+    })
 }
 
 /// First line as the title, the rest as the body; an app that sends only one

@@ -42,6 +42,8 @@ pub enum Feature {
     Mail,
     /// Other apps' notifications shown in the notch.
     NotificationMirror,
+    /// Place name on the Today tab (OS location + network lookup, opt-in).
+    Location,
 }
 
 impl Feature {
@@ -62,6 +64,7 @@ impl Feature {
         Feature::CameraMirror,
         Feature::Mail,
         Feature::NotificationMirror,
+        Feature::Location,
     ];
 
     /// Label for the tray menu and the settings window.
@@ -82,15 +85,17 @@ impl Feature {
             Feature::CameraMirror => "Camera mirror",
             Feature::Mail => "Mail (read-only)",
             Feature::NotificationMirror => "Notifications from other apps",
+            Feature::Location => "Location (Today tab)",
         }
     }
 
     /// Whether the feature uses the network at all, so the settings window can
-    /// mark it clearly: lyrics, the speech model download and mail.
+    /// mark it clearly: lyrics, the speech model download, mail and the
+    /// location lookup.
     pub fn uses_network(&self) -> bool {
         matches!(
             self,
-            Feature::Lyrics | Feature::SpeechToText | Feature::Mail
+            Feature::Lyrics | Feature::SpeechToText | Feature::Mail | Feature::Location
         )
     }
 
@@ -113,6 +118,7 @@ impl Feature {
             Feature::Mail => cfg!(feature = "mail"),
             // Windows: UserNotificationListener. Linux: a D-Bus monitor.
             Feature::NotificationMirror => cfg!(any(windows, target_os = "linux")),
+            Feature::Location => cfg!(feature = "location"),
             // The mixer needs no extra crates on either OS.
             Feature::VolumeMixer => true,
         }
@@ -137,6 +143,7 @@ impl Feature {
             Feature::CameraMirror => f.camera_mirror,
             Feature::Mail => f.mail,
             Feature::NotificationMirror => f.notification_mirror,
+            Feature::Location => f.location,
         }
     }
 }

@@ -168,6 +168,9 @@ pub struct BannerView {
     pub tab: Option<Tab>,
     /// The app it came from, as a small caption (mirrored notifications).
     pub app: Option<String>,
+    /// Clicking opens this app instead of the panel (mirrored notifications;
+    /// see [`crate::platform::ForeignNotification::launch`]).
+    pub launch: Option<String>,
 }
 
 /// The collapsed pill's content.

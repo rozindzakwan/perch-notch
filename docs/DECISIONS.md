@@ -470,3 +470,40 @@ while the stripe rests (no wake-ups, 0 CPU).
   docks, so there the stripe is covered and can't be hovered (it works over
   maximized windows). Making the notch an override-redirect window would get
   around that, at the cost of managing its stacking ourselves.
+
+## ADR-022: Location for the Today tab, and opening apps from banners
+
+**Context.** The Today tab should say where you are, which needs a precise
+position (the OS location service) and a place name (a network lookup).
+Mirrored notification banners should show the sending app's icon, and a
+reply box was asked for.
+
+**Decision: location.** Off by default and marked "uses network". The OS
+gives the position (Windows `Geolocator`, which an unpackaged app may use
+once "Let desktop apps access your location" is on; Linux GeoClue 2 on the
+system bus, one client started and stopped per lookup). It is rounded to 3
+decimals (about 110 m) and sent to OpenStreetMap Nominatim (`/reverse`,
+`zoom=14`) with the same generic user agent as the lyrics lookup. The model
+asks at most once an hour, and the worker repeats no request while the
+rounded position is unchanged. The place lives in memory only: never on
+disk, never logged. A failure keeps the last place and retries after
+10 minutes; turning the feature off forgets the place at once. No IP-based
+fallback: that would send the address to yet another service, and the user
+asked for a precise place.
+
+**Decision: banner icons and clicks.** The platform layer hands over the
+icon as encoded bytes (Windows: the app's logo from `AppInfo`, read once per
+app; Linux: a `hicolor` / `pixmaps` PNG named by `app_icon` or the
+`desktop-entry` hint, else the `image-data` picture, else `image-path`).
+The model decodes it to a 64 px thumbnail. Clicking a banner opens the app:
+Windows `shell:AppsFolder\<AppUserModelID>` (Store and desktop apps alike),
+Linux `gtk-launch <entry>` with `gio launch` as the fallback, only if that
+`.desktop` file is installed. Ids come from other apps, so
+`launchable_id` refuses anything that could be read as an option or a path.
+
+**Rejected: replying from the banner.** Neither OS lets one app press
+another app's notification buttons or fill its reply box. Windows exposes
+other apps' toasts read-only (`UserNotificationListener`), and on Linux
+only the notification daemon emits `ActionInvoked`; the specification has no
+method for a third party to invoke an action.
+Opening the app is the closest thing that works.

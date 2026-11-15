@@ -105,13 +105,28 @@ pub struct ShellOpener;
 
 impl Opener for ShellOpener {
     fn open(&self, path: &Path) -> Result<()> {
-        let target = HSTRING::from(path.as_os_str());
+        shell_open(&HSTRING::from(path.as_os_str()))
+    }
+
+    /// Store and desktop apps alike are listed in the Apps folder under
+    /// their AppUserModelID, so `shell:AppsFolder\<id>` starts (or focuses)
+    /// the app that sent a notification.
+    fn launch_app(&self, id: &str) -> Result<()> {
+        if !perch_core::platform::launchable_id(id) {
+            return Err(Error::unavailable("launch", "not an app id"));
+        }
+        shell_open(&HSTRING::from(format!("shell:AppsFolder\\{id}")))
+    }
+}
+
+fn shell_open(target: &HSTRING) -> Result<()> {
+    {
         // SAFETY: all strings are valid for the call; no window owner.
         let r = unsafe {
             ShellExecuteW(
                 None,
                 w!("open"),
-                &target,
+                target,
                 PCWSTR::null(),
                 PCWSTR::null(),
                 SW_SHOWNORMAL,

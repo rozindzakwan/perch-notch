@@ -121,8 +121,9 @@ pub fn settings_spec(cfg: &Config, monitors: &[Monitor], mail: &MailBoard) -> Fo
     fields.push(Field::Note(
         "Everything runs locally. Nothing is sent anywhere unless you turn on a feature marked \
          \"uses network\": lyrics are fetched from lrclib.net, dictation downloads its \
-         speech model once, and mail connects to the mail servers you add (read-only; \
-         passwords stay in the system keychain)."
+         speech model once, mail connects to the mail servers you add (read-only; \
+         passwords stay in the system keychain), and location sends your position, \
+         rounded to about 100 m, to OpenStreetMap once an hour to name the place."
             .into(),
     ));
     if Feature::Mail.enabled_in(cfg) && Feature::Mail.compiled_in() {
@@ -263,6 +264,7 @@ pub fn set_feature(cfg: &mut Config, f: Feature, on: bool) {
         Feature::CameraMirror => &mut flags.camera_mirror,
         Feature::Mail => &mut flags.mail,
         Feature::NotificationMirror => &mut flags.notification_mirror,
+        Feature::Location => &mut flags.location,
     };
     *slot = on;
     // Lyrics need something to sync to.

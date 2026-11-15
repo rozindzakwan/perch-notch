@@ -58,6 +58,7 @@ windows = { version = "0.58", features = [
     "UI_Notifications",
     "UI_Notifications_Management",
     "ApplicationModel",
+    "Devices_Geolocation",
     "Data_Xml_Dom",
 ] }
 

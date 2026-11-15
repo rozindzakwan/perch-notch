@@ -19,6 +19,8 @@ pub mod capture;
 #[cfg(target_os = "linux")]
 pub mod clipboard;
 #[cfg(target_os = "linux")]
+pub mod location;
+#[cfg(target_os = "linux")]
 pub mod mpris;
 #[cfg(target_os = "linux")]
 pub mod notifications;

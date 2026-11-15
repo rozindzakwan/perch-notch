@@ -68,6 +68,8 @@ pub enum UserEvent {
         /// LRC text, `None` if not found.
         lrc: Option<String>,
     },
+    /// A location lookup finished: the place name, or why not.
+    Location(Result<String, String>),
     /// The mail client reported something.
     #[cfg(feature = "mail")]
     Mail(perch_core::mail::MailUpdate),
@@ -665,6 +667,12 @@ impl Shell {
                     }
                 }
                 Effect::Transport(cmd) => self.transport(cmd),
+                Effect::Locate => {
+                    let proxy = self.proxy.clone();
+                    crate::location::locate_async(move |r| {
+                        let _ = proxy.send_event(UserEvent::Location(r));
+                    });
+                }
                 Effect::FetchLyrics(req) => {
                     let proxy = self.proxy.clone();
                     let cache = persist::cache_dir().map(|d| d.join("lyrics"));
@@ -688,6 +696,11 @@ impl Shell {
                     }
                     None => log::warn!("clipboard unavailable"),
                 },
+                Effect::LaunchApp(id) => {
+                    if let Err(e) = self.services.opener.launch_app(&id) {
+                        log::warn!("opening the app of a notification: {e}");
+                    }
+                }
                 Effect::Open(path) => {
                     if let Err(e) = self.services.opener.open(&path) {
                         log::warn!("opening {}: {e}", path.display());
@@ -1444,6 +1457,10 @@ impl ApplicationHandler<UserEvent> for Shell {
                 };
                 self.model.flash(msg, Now::real());
                 self.request_redraw();
+            }
+            UserEvent::Location(r) => {
+                let fx = self.model.location_found(r, Now::real());
+                self.run_effects(el, fx);
             }
             UserEvent::Lyrics { key, lrc } => {
                 let fx = self.model.lyrics_loaded(&key, lrc.as_deref());

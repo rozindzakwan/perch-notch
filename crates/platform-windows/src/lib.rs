@@ -20,6 +20,8 @@ pub mod events;
 #[cfg(windows)]
 mod fullscreen;
 #[cfg(windows)]
+pub mod location;
+#[cfg(windows)]
 pub mod media;
 #[cfg(windows)]
 pub mod mixer;

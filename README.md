@@ -39,10 +39,12 @@ config file.
 
 | Feature | What it does | Default |
 |---|---|---|
+| **Today** | The first tab: the time, the date and (with Location on) where you are. When nothing is playing, the collapsed pill shows the time and date. | on |
+| **Location** | The place name on the Today tab ("Dago, Bandung"). Windows location services or GeoClue give the position; it is rounded to about 100 m and sent to OpenStreetMap Nominatim once an hour to name the place. Kept in memory only. Uses the network, only after you turn it on. | off |
 | **Now playing** | Track, artist, cover art, play/pause/next/previous and a seek bar. Windows: System Media Transport Controls (Spotify, browsers, Media Player...). Linux: MPRIS (Rhythmbox, Firefox, VLC, Spotify...). The collapsed pill shows the track, or the current lyric line, live, when synced lyrics are on. Drag the seek bar to jump. | on |
 | **Synced lyrics** | Time-synced lyrics from [LRCLIB](https://lrclib.net) for the current track, cached on disk. Uses the network, only after you turn it on. | off |
-| **Mail (read-only)** | Unread mail from your IMAP accounts (Gmail, company mail on Spacemail, Yahoo, iCloud, Fastmail, Zoho or any IMAP server): an unread count in the pill, a Mail tab with sender, subject and age, and a notification for new mail. New mail is **pushed** (IMAP IDLE), not polled. Perch opens the inbox read-only and fetches only envelopes, so it **can't mark, move, delete or download** messages. Passwords live in the system keychain (Windows Credential Manager / GNOME Keyring), never in the config file. | off |
-| **Notifications from other apps** | Mirrors other apps' notifications (WhatsApp, Teams, Discord, Thunderbird...) into the notch as a half-open banner: app, sender and two lines of text. Windows: read locally through its notification access. Linux: a copy of each one sent to the desktop's notification service (D-Bus). Nothing is stored or sent. | off |
+| **Mail (read-only)** | Unread mail from your IMAP accounts (Gmail, company mail on Spacemail, Yahoo, iCloud, Fastmail, Zoho or any IMAP server): an unread count in the pill, a Mail tab with sender, subject and age (with several accounts, tabs above the list: **All** plus one per account, each with its unread count), and a notification for new mail. New mail is **pushed** (IMAP IDLE), not polled. Perch opens the inbox read-only and fetches only envelopes, so it **can't mark, move, delete or download** messages. Passwords live in the system keychain (Windows Credential Manager / GNOME Keyring), never in the config file. | off |
+| **Notifications from other apps** | Mirrors other apps' notifications (WhatsApp, Teams, Discord, Thunderbird...) into the notch as a half-open banner: the app's icon, the app, the sender and two lines of text. Click the banner to open that app. You can't reply from the banner: neither Windows nor Linux lets one app press another app's notification buttons. Windows: read locally through its notification access. Linux: a copy of each one sent to the desktop's notification service (D-Bus). Nothing is stored or sent. | off |
 | **To-do** | A short list with optional due times, which raise a notification. | on |
 | **Pomodoro** | 25/5 timer with the countdown in the collapsed pill. | off |
 | **Clipboard history** | Text and images, 50 entries, in memory only. Copies that password managers mark as secret are **never read** (Windows clipboard-exclusion formats; X11 `x-kde-passwordManagerHint`). | off |
@@ -109,6 +111,8 @@ How each claim was checked:
 | Lyrics | unit + integration tests (fake HTTP); live LRCLIB fetch not exercised by tests | same | same | — |
 | To-do, Pomodoro, reminders | verified on Windows (CLI + model tests) | CI-verified | same | — |
 | Notifications | implemented (toast, AppUserModelID registered per user); in-pill fallback verified | CI-verified (D-Bus notifications test) | same | — |
+| Other apps' notifications: icon, click opens the app | model tests (icon decoded, click launches, unsafe ids refused); reading a real app's logo and `shell:AppsFolder` launch implemented, not exercised by automation | CI-verified (`image-data` picture and `desktop-entry` read from a real `Notify` call); theme icon lookup unit-tested; `gtk-launch` untested | same | — |
+| Location (Today tab) | model, parsing and rounding tests; Windows `Geolocator` and the live Nominatim request not exercised by automation (they would send this machine's position) | GeoClue client implemented, untested (no GeoClue in the container) | same | — |
 | Clipboard history + password-manager skip | verified on Windows | CI-verified (`xclip` + KeePassXC-style owner) | same | — |
 | File shelf | drop in: model tests; drag out: implemented, untested by automation | drop in: model tests; copy as file: implemented | same | — |
 | Volume mixer | verified on Windows (opt-in real-audio test: finds and controls a live stream) | CI-verified (PulseAudio null sink + `paplay`) | same | — |
@@ -245,6 +249,7 @@ camera_mirror = false
 speech_to_text = false     # perch-speech build; downloads a model once
 mail = false               # network: your IMAP servers, read-only
 notification_mirror = false  # show other apps' notifications
+location = false           # network: place name on the Today tab
 
 [notifications]
 in_notch = true            # banners inside the notch
@@ -298,11 +303,14 @@ this file. Data lives next to it: `%APPDATA%\perch\data` on Windows,
 ## Privacy
 
 - Everything stays on your machine. No telemetry, accounts, analytics or ads.
-- Only three features touch the network, and only after you turn them on:
+- Only four features touch the network, and only after you turn them on:
   **lyrics** (one request to `lrclib.net` per new track; the result is
   cached), **dictation** (a one-time model download from Hugging Face, checked
-  by SHA-256), and **mail** (a TLS connection to each mail server *you* add,
-  nothing else). The settings window marks which features use the network.
+  by SHA-256), **mail** (a TLS connection to each mail server *you* add,
+  nothing else), and **location** (your position, rounded to about 100 m, sent
+  to `nominatim.openstreetmap.org` at most once an hour, and not again while
+  you stay put; the place name is kept in memory only and forgotten when you
+  turn it off). The settings window marks which features use the network.
 - Mail is read-only by construction: Perch opens the folder with `EXAMINE` and
   fetches only `UID INTERNALDATE ENVELOPE` for unread messages, never message
   bodies. Passwords are stored only in the system keychain; the config file
@@ -387,6 +395,16 @@ writes `artifacts/mint/mint-results.md`.
 - **Unsigned builds**: see SmartScreen above.
 - **Camera mirror** wasn't run against the webcam, because that would turn the
   camera on without the owner present.
+- **Location** wasn't run for real, for the same reason: it would send this
+  machine's position to OpenStreetMap. On Windows it needs "Let desktop apps
+  access your location" on. On Linux it needs GeoClue, which may not find a
+  position on some systems (its old Mozilla Location Service backend has shut
+  down); the Today tab then says "Location unavailable".
+- **Replying from a notification banner** isn't possible: Windows and Linux
+  don't let one app press another app's notification buttons or reply box.
+  Click the banner to open the app instead.
+- **Notification icons on Linux** are PNG only (no SVG renderer): an app whose
+  icon exists only as SVG shows its letters instead.
 - **Mail: no OAuth.** Accounts that only allow OAuth sign-in (Microsoft 365,
   Outlook.com, and Google accounts without app passwords) don't work yet.
   Password and app-password sign-in over TLS/STARTTLS does. OAuth needs an

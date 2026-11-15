@@ -150,6 +150,9 @@ pub struct FeatureFlags {
     pub mail: bool,
     /// Show other apps' notifications in the notch (opt-in: reads their text).
     pub notification_mirror: bool,
+    /// Where you are, for the Today tab: the OS location service, then the
+    /// place name from OpenStreetMap Nominatim (network, opt-in).
+    pub location: bool,
 }
 
 impl Default for FeatureFlags {
@@ -170,6 +173,7 @@ impl Default for FeatureFlags {
             camera_mirror: false,
             mail: false,
             notification_mirror: false,
+            location: false,
         }
     }
 }

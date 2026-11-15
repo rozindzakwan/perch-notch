@@ -55,20 +55,44 @@ pub struct XdgOpener;
 
 impl Opener for XdgOpener {
     fn open(&self, path: &Path) -> Result<()> {
-        let mut child = std::process::Command::new("xdg-open")
-            .arg(path)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map_err(|e| Error::io("running xdg-open", e))?;
-        let _ = std::thread::Builder::new()
-            .name("perch-reap".into())
-            .spawn(move || {
-                let _ = child.wait();
-            });
-        Ok(())
+        spawn_detached("xdg-open", &[path.as_os_str()])
     }
+
+    /// The `.desktop` entry a notification named (its `desktop-entry` hint),
+    /// started with `gtk-launch` (GTK 3, on Mint by default) or, failing
+    /// that, `gio launch` on the entry's file.
+    fn launch_app(&self, id: &str) -> Result<()> {
+        let id = id.trim_end_matches(".desktop");
+        if !perch_core::platform::launchable_id(id) || id.contains(['\\', ' ']) {
+            return Err(Error::unavailable("launch", "not a desktop entry name"));
+        }
+        let file = crate::notifications::desktop_file(id)
+            .ok_or_else(|| Error::unavailable("launch", format!("no {id}.desktop installed")))?;
+        spawn_detached("gtk-launch", &[std::ffi::OsStr::new(id)])
+            .or_else(|_| spawn_detached("gio", &[std::ffi::OsStr::new("launch"), file.as_os_str()]))
+    }
+}
+
+/// Run a program, detached; its exit is collected on a short-lived thread so
+/// no zombie is left behind.
+fn spawn_detached(program: &str, args: &[&std::ffi::OsStr]) -> Result<()> {
+    let mut child = std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| Error::io("running a helper program", e))?;
+    reap(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+fn reap(f: impl FnOnce() + Send + 'static) {
+    let _ = std::thread::Builder::new()
+        .name("perch-reap".into())
+        .spawn(f);
 }
 
 /// Idle time from the MIT-SCREEN-SAVER extension (X11). On Wayland the

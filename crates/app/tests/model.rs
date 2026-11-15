@@ -1063,7 +1063,58 @@ fn foreign(app: &str, title: &str, body: &str) -> PlatformEvent {
         app: app.into(),
         title: title.into(),
         body: body.into(),
+        icon: None,
+        launch: None,
     })
+}
+
+#[test]
+fn a_mirrored_banner_shows_the_app_icon_and_a_click_opens_the_app() {
+    use perch_core::view::RowLeading;
+    let now = t0();
+    let mut cfg = config_all();
+    cfg.features.notification_mirror = true;
+    let mut m = Model::new(cfg, now);
+    m.set_panel_state(false, true, now);
+    // A 2x2 red PNG as the app's icon.
+    let mut png = Vec::new();
+    image::ImageEncoder::write_image(
+        image::codecs::png::PngEncoder::new(&mut png),
+        &[255, 0, 0, 255].repeat(4),
+        2,
+        2,
+        image::ExtendedColorType::Rgba8,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let event = |launch: &str| {
+        PlatformEvent::ForeignNotification(perch_core::platform::ForeignNotification {
+            app: "WhatsApp".into(),
+            title: "Ann".into(),
+            body: "hi".into(),
+            icon: Some(png.clone()),
+            launch: Some(launch.into()),
+        })
+    };
+    let aumid = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App";
+    m.handle_event(&event(aumid), now);
+    let b = m.view(now).banner.unwrap_or_else(|| panic!("a banner"));
+    match &b.leading {
+        RowLeading::Thumb(px, side) => {
+            assert_eq!(*side, 64);
+            assert_eq!(&px[..4], &[255, 0, 0, 255], "the icon's pixels");
+        }
+        other => panic!("{other:?}"),
+    }
+    let fx = m.action(Action::BannerOpen, now);
+    assert!(fx.contains(&Effect::LaunchApp(aumid.into())));
+    assert!(!fx.contains(&Effect::OpenPanel), "the app, not the panel");
+
+    // An id that looks like an option or a path is dropped: the click opens
+    // the panel as before.
+    m.handle_event(&event("--evil"), now);
+    let fx = m.action(Action::BannerOpen, now);
+    assert!(fx.contains(&Effect::OpenPanel));
+    assert!(!fx.iter().any(|e| matches!(e, Effect::LaunchApp(_))));
 }
 
 #[test]
@@ -1109,6 +1160,79 @@ fn the_padlock_asks_the_shell_to_flip_the_lock_and_shows_its_state() {
 }
 
 #[test]
+fn location_is_looked_up_hourly_only_while_on_and_forgotten_when_off() {
+    let now = t0();
+    let place = |m: &mut Model, at: Now| match m.view(at).body {
+        Body::Today(t) => t.location,
+        other => panic!("{other:?}"),
+    };
+    // Off (the default): never asked for, and the tab says how to turn it on.
+    let mut m = Model::new(config_all(), now);
+    assert!(!m.tick(now).contains(&Effect::Locate));
+    assert_eq!(place(&mut m, now), None);
+
+    let mut cfg = config_all();
+    cfg.features.location = true;
+    let mut m = Model::new(cfg.clone(), now);
+    let fx = m.tick(now);
+    assert_eq!(
+        fx.iter().filter(|e| **e == Effect::Locate).count(),
+        1,
+        "asked once at start"
+    );
+    assert_eq!(
+        place(&mut m, now).as_deref(),
+        Some("Finding where you are\u{2026}")
+    );
+    let later = now.plus(Duration::from_secs(5));
+    assert!(
+        !m.tick(later).contains(&Effect::Locate),
+        "never twice while waiting"
+    );
+    m.location_found(Ok("Dago, Bandung".into()), later);
+    assert_eq!(place(&mut m, later).as_deref(), Some("Dago, Bandung"));
+    // Next lookup an hour later: that is the only wake-up it adds.
+    let wake = m
+        .next_deadline(later, false)
+        .unwrap_or_else(|| panic!("a deadline"));
+    assert!(
+        wake <= Duration::from_secs(60),
+        "the clock still wakes each minute"
+    );
+    assert!(!m
+        .tick(later.plus(Duration::from_secs(3_500)))
+        .contains(&Effect::Locate));
+    assert!(m
+        .tick(later.plus(Duration::from_secs(3_600)))
+        .contains(&Effect::Locate));
+    // A failure keeps the last place and retries in 10 minutes.
+    let t = later.plus(Duration::from_secs(3_601));
+    m.location_found(Err("no fix".into()), t);
+    assert_eq!(place(&mut m, t).as_deref(), Some("Dago, Bandung"));
+    assert!(m
+        .tick(t.plus(Duration::from_secs(600)))
+        .contains(&Effect::Locate));
+
+    // Turned off: the place is forgotten at once and nothing more is asked.
+    m.apply_config(config_all());
+    assert_eq!(place(&mut m, t), None);
+    assert!(!m
+        .tick(t.plus(Duration::from_secs(7_200)))
+        .contains(&Effect::Locate));
+    // A late answer after turning off is dropped.
+    m.location_found(Ok("Somewhere".into()), t);
+    assert_eq!(place(&mut m, t), None);
+
+    // A first lookup that fails says so instead of "finding" forever.
+    let mut m = Model::new(cfg, now);
+    m.tick(now);
+    m.location_found(Err("denied".into()), now);
+    assert!(place(&mut m, now)
+        .unwrap_or_default()
+        .starts_with("Location unavailable"));
+}
+
+#[test]
 fn today_is_the_first_tab_and_the_idle_pill_shows_the_time() {
     let now = t0();
     let mut m = Model::new(config_all(), now);
@@ -1123,13 +1247,12 @@ fn today_is_the_first_tab_and_the_idle_pill_shows_the_time() {
         }
         other => panic!("the time when nothing plays: {other:?}"),
     }
-    m.set_location(Some("Bandung, West Java".into()));
     m.action(Action::SelectTab(Tab::Today), now);
     match m.view(now).body {
         Body::Today(t) => {
             assert_eq!(t.time, lt.time());
             assert_eq!(t.date, lt.date_long());
-            assert_eq!(t.location.as_deref(), Some("Bandung, West Java"));
+            assert_eq!(t.location, None, "location is off by default");
         }
         other => panic!("{other:?}"),
     }

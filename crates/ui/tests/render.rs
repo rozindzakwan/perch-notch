@@ -768,6 +768,7 @@ fn a_mirrored_notification_banner_shows_the_app_and_two_lines_of_text() {
             body: body.into(),
             tab: None,
             app: app.map(str::to_string),
+            launch: None,
         }),
         ..PanelView::default()
     };

@@ -153,7 +153,30 @@ fn other_apps_notifications_are_mirrored_as_they_are_sent() {
     DbusNotifier::default()
         .notify("Time to stretch", "Stand up.")
         .unwrap_or_else(|e| panic!("notify: {e}"));
-    // Another app's is, as plain text.
+    // Another app's is, as plain text, with its picture (a red pixel) and
+    // its installed desktop entry (so a click can open it).
+    let data = std::env::temp_dir().join(format!("perch-xdg-{}", std::process::id()));
+    std::fs::create_dir_all(data.join("applications")).unwrap_or_else(|e| panic!("{e}"));
+    std::fs::write(
+        data.join("applications/perch-test-mail.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Mail\nExec=true\n",
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    std::env::set_var("XDG_DATA_HOME", &data);
+    let mut hints = HashMap::<String, zbus::zvariant::Value>::new();
+    hints.insert(
+        "image-data".into(),
+        zbus::zvariant::Value::from(zbus::zvariant::Structure::from((
+            1i32,
+            1i32,
+            4i32,
+            true,
+            8i32,
+            4i32,
+            vec![255u8, 0, 0, 255],
+        ))),
+    );
+    hints.insert("desktop-entry".into(), "perch-test-mail".into());
     let app = zbus::blocking::Connection::session().unwrap_or_else(|e| panic!("{e}"));
     let reply = app.call_method(
         Some("org.freedesktop.Notifications"),
@@ -167,7 +190,7 @@ fn other_apps_notifications_are_mirrored_as_they_are_sent() {
             "Ann Lee",
             "<b>See you</b> at 8 &amp; bring it",
             Vec::<String>::new(),
-            HashMap::<String, zbus::zvariant::Value>::new(),
+            hints,
             -1i32,
         ),
     );
@@ -176,14 +199,23 @@ fn other_apps_notifications_are_mirrored_as_they_are_sent() {
     let got = rx
         .recv_timeout(Duration::from_secs(5))
         .unwrap_or_else(|e| panic!("no mirrored notification: {e}"));
+    let ForeignNotification {
+        app: from,
+        title,
+        body,
+        icon,
+        launch,
+    } = got;
     assert_eq!(
-        got,
-        ForeignNotification {
-            app: "Thunderbird".into(),
-            title: "Ann Lee".into(),
-            body: "See you at 8 & bring it".into(),
-        }
+        (from.as_str(), title.as_str(), body.as_str()),
+        ("Thunderbird", "Ann Lee", "See you at 8 & bring it")
     );
+    let icon = image::load_from_memory(&icon.unwrap_or_else(|| panic!("no icon")))
+        .unwrap_or_else(|e| panic!("{e}"))
+        .to_rgba8();
+    assert_eq!(icon.as_raw().as_slice(), &[255, 0, 0, 255], "the red pixel");
+    assert_eq!(launch.as_deref(), Some("perch-test-mail"));
+    let _ = std::fs::remove_dir_all(&data);
     assert!(
         rx.recv_timeout(Duration::from_millis(500)).is_err(),
         "only that one: Perch's own was skipped"

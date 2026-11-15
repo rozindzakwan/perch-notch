@@ -19,7 +19,7 @@ Environments:
 | `cargo fmt --all --check` | Windows, container | clean |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Windows (default features; GNU can't build `speech`) | clean (0 warnings) |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | container | clean (0 warnings) |
-| `cargo test --workspace` | Windows | 388 passed, 0 failed, 7 ignored (opt-in hardware tests, run separately below, and the release-only render budget) |
+| `cargo test --workspace` | Windows | 416 passed, 0 failed, 7 ignored (opt-in hardware tests, run separately below, and the release-only render budget) |
 | `cargo test --release -p perch-ui --test budget` | Windows | settled Music panel: **1.9 ms at 1×, 6.5 ms at 2×** (budgets 4 / 8 ms) |
 | `cargo test --workspace --all-features --locked` | container | all passed, 0 failed |
 | `cargo audit` | Windows | 0 vulnerabilities; 7 warnings: 6 unmaintained crates (paste, proc-macro-error, ttf-parser, zbus_names, zvariant, zvariant_derive) and `glib` 0.18 "unsound", which is only in the lockfile through `tray-icon`'s Linux GTK deps and is never compiled (tray-icon is Windows-only here; Linux uses ksni) |
@@ -236,6 +236,26 @@ was complete and re-scored with `--summarize`.) Evidence:
 Not automated: dragging with a real mouse, and the System row following the
 Windows volume keys (it uses the same endpoint-volume callback that Windows'
 own flyout uses; on Linux the `pactl` check covers the equivalent path).
+
+## 3c. Today tab, mail account tabs, notification icons, location
+
+| Test | Where | Result |
+|---|---|---|
+| core `clock`: civil date from unix time, local offsets, "14:05" / "Sunday, 15 November" / "Sun 15 Nov", seconds to the next minute | both | passed |
+| model: Today is the first tab; the idle pill shows the time and date with a clock icon, and gives way to a playing track; the only idle wake-up is the next whole minute | both | passed |
+| model: two mail accounts give tabs **All 3 / Work 2 / Gmail 1** (All selected), rows newest first across accounts; picking Gmail shows only its mail; back to All | both | passed |
+| render: the account tabs are buttons, left to right, above the rows and before the Accounts chip | both | passed |
+| core `launchable_id`: Store and desktop AppUserModelIDs and `.desktop` names pass; options (`--help`), `..` paths, `/` paths, quotes, `;` and newlines are refused | both | passed |
+| model: a mirrored notification with an icon shows it (64 px, the icon's own pixels); clicking the banner launches the app instead of opening the panel; an id like `--evil` is dropped and the click opens the panel | both | passed |
+| Linux D-Bus monitor (`session_bus`): a real `Notify` call carrying an `image-data` picture and a `desktop-entry` hint arrives with the picture (decoded back to the same red pixel) and the entry as the launch id | container | passed |
+| Linux: raw `image-data` (RGB with padded rows, RGBA) to RGBA, malformed or 16-bit refused; theme icon found by name in `hicolor`, `../` and `/` names refused | container | passed |
+| app `location`: coordinates rounded to 3 decimals; Nominatim answers to "Dago, Bandung", "Lembang, West Java", "Berlin" (no repeat), display-name fallback, errors and bad JSON give nothing | both | passed |
+| model: location off by default (never asked, the tab says how to turn it on); on: asked once at start, never twice while waiting, again after an hour; a failure keeps the last place and retries in 10 min; turning it off forgets the place at once and drops late answers | both | passed |
+
+Not automated, on purpose: the live location lookup (Windows `Geolocator` /
+GeoClue, then Nominatim), because it would send this machine's position to
+an outside service; reading a real app's logo and opening it through
+`shell:AppsFolder` on Windows; `gtk-launch` on Linux.
 
 ## 3b. Mail (read-only IMAP)
 

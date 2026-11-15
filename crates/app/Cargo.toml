@@ -52,11 +52,14 @@ default = [
     "screenshot",
     "camera",
     "mail",
+    "location",
 ]
 # Optional features are compile-time gated as well as config-gated, so a build
 # without them does not contain their code at all.
 media = []
 lyrics = ["ureq"]
+# Place name for the Today tab: OS location + one reverse-geocode request.
+location = ["ureq"]
 productivity = []
 screen-time = ["rusqlite"]
 clipboard = []
@@ -76,6 +79,7 @@ all-features = [
     "screenshot",
     "camera",
     "mail",
+    "location",
     "speech",
 ]
 

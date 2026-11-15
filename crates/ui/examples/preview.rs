@@ -278,6 +278,7 @@ fn main() {
             body: "See you at eight at the usual place, and please bring the charger and the blue folder".into(),
             tab: None,
             app: Some("WhatsApp".into()),
+            launch: None,
         }),
         ..PanelView::default()
     };
