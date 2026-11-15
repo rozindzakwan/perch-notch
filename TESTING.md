@@ -64,7 +64,13 @@ It waits until the keyboard and mouse have been idle for 60 s (`scripts/lib-idle
 so it never fights a person at the machine, and captures only the pill window.
 It first puts a small window of its own in front (and brings it back after
 the fullscreen and maximized checks), because over a person's maximized
-window the notch rightly rests as a stripe.
+window the notch rightly rests as a stripe. Windows refuses to bring a window
+forward for a process that isn't in front (the script started from a
+background shell once left a maximized window in front, the notch stayed a
+stripe and the to-do banner rightly waited), so the script briefly shares
+the input state of the window that is in front (`AttachThreadInput`) for
+that one call. Last run (2026-11-15, after the mail tabs, notification icons
+and location): 36/36.
 
 Checks, in order: windows created; the pill and the 2 px hover strip exist with
 `TOOLWINDOW|NOACTIVATE|TOPMOST` and no `APPWINDOW` (no taskbar/Alt-Tab);

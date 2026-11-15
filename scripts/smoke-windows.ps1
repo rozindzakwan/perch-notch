@@ -68,6 +68,9 @@ if (-not ([System.Management.Automation.PSTypeName]'PerchNative').Type) {
 Add-Type -Namespace '' -Name PerchNative -MemberDefinition @'
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+    [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+    [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, IntPtr e);
     [DllImport("user32.dll", SetLastError=true)] public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
@@ -258,9 +261,25 @@ try {
     $base.StartPosition = 'Manual'
     $base.Bounds = New-Object System.Drawing.Rectangle 80, 300, 520, 360
     $base.Show()
+    # Windows refuses SetForegroundWindow from a process that isn't in front
+    # (e.g. this script started from a background shell). Sharing the input
+    # state of the window that is in front, for this one call, is allowed.
+    function Set-Front([IntPtr]$h) {
+        $fg = [PerchNative]::GetForegroundWindow()
+        $fgPid = [uint32]0
+        $fgThread = [PerchNative]::GetWindowThreadProcessId($fg, [ref]$fgPid)
+        $me = [PerchNative]::GetCurrentThreadId()
+        $attached = $false
+        if ($fgThread -ne 0 -and $fgThread -ne $me) {
+            $attached = [PerchNative]::AttachThreadInput($me, $fgThread, $true)
+        }
+        [PerchNative]::BringWindowToTop($h) | Out-Null
+        [PerchNative]::SetForegroundWindow($h) | Out-Null
+        if ($attached) { [PerchNative]::AttachThreadInput($me, $fgThread, $false) | Out-Null }
+    }
     function Show-Base {
         $base.Activate()
-        [PerchNative]::SetForegroundWindow($base.Handle) | Out-Null
+        Set-Front $base.Handle
         for ($i = 0; $i -lt 15; $i++) {
             [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100
             $s = Read-Status
@@ -373,7 +392,7 @@ try {
     $form.BackColor = [System.Drawing.Color]::Black
     $form.Show()
     $form.Activate()
-    [PerchNative]::SetForegroundWindow($form.Handle) | Out-Null
+    Set-Front $form.Handle
     for ($i = 0; $i -lt 10; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
     $isFg = ([PerchNative]::GetForegroundWindow() -eq $form.Handle)
     # The shell's quiet state can lag the foreground change; Perch re-checks
@@ -434,7 +453,7 @@ try {
     $max.WindowState = 'Maximized'
     $max.Show()
     $max.Activate()
-    [PerchNative]::SetForegroundWindow($max.Handle) | Out-Null
+    Set-Front $max.Handle
     for ($i = 0; $i -lt 15; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
     if ([PerchNative]::GetForegroundWindow() -eq $max.Handle) {
         $st = Read-Status
