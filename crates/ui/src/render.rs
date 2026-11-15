@@ -825,10 +825,47 @@ fn leading_of(l: &perch_core::view::RowLeading) -> glass::Leading {
     }
 }
 
-/// A list body: "N items" + header chip, then rows (two lines when they
-/// have a subtitle), or the empty text.
+/// Widths for items that want `natural` widths in `avail` space: all of
+/// them when they fit; otherwise the narrow ones keep theirs and the rest
+/// share what is left equally (never below `min`). Pure.
+pub fn fit_widths(natural: &[f32], avail: f32, min: f32) -> Vec<f32> {
+    let total: f32 = natural.iter().sum();
+    if total <= avail || natural.is_empty() {
+        return natural.to_vec();
+    }
+    let mut fixed = vec![false; natural.len()];
+    loop {
+        let (used, open) = natural
+            .iter()
+            .zip(&fixed)
+            .fold(
+                (0.0, 0usize),
+                |(u, n), (w, f)| if *f { (u + w, n) } else { (u, n + 1) },
+            );
+        if open == 0 {
+            return natural.to_vec();
+        }
+        let share = ((avail - used) / open as f32).max(min);
+        let mut changed = false;
+        for (i, w) in natural.iter().enumerate() {
+            if !fixed[i] && *w <= share {
+                fixed[i] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            return natural
+                .iter()
+                .zip(&fixed)
+                .map(|(w, f)| if *f { *w } else { share })
+                .collect();
+        }
+    }
+}
+
 /// A row of pill tabs ("All 3", "Work 2") above a list; the selected one is
-/// filled. Each is a button with its own action.
+/// filled. Each is a button with its own action. When they don't fit, long
+/// names are shortened with "…" (the count stays); no tab is ever dropped.
 fn filter_pills(
     ctx: &mut Ctx<'_>,
     filters: &[perch_core::view::ListFilter],
@@ -840,18 +877,31 @@ fn filter_pills(
     let s = ctx.s;
     let pad = 10.0 * s;
     let gap = 6.0 * s;
+    let space = ctx.measure(" ", text::CAPTION);
+    let parts: Vec<(f32, String, f32)> = filters
+        .iter()
+        .map(|f| {
+            let count = if f.count > 0 {
+                f.count.to_string()
+            } else {
+                String::new()
+            };
+            let cw = if count.is_empty() {
+                0.0
+            } else {
+                ctx.measure(&count, text::CAPTION) + space
+            };
+            (ctx.measure(&f.label, text::CAPTION), count, cw)
+        })
+        .collect();
+    let natural: Vec<f32> = parts
+        .iter()
+        .map(|(nw, _, cw)| nw + cw + 2.0 * pad)
+        .collect();
+    let avail = max_w - gap * filters.len().saturating_sub(1) as f32;
+    let widths = fit_widths(&natural, avail, 2.0 * pad + 24.0 * s);
     let mut px = x;
-    for f in filters {
-        let label = if f.count > 0 {
-            format!("{} {}", f.label, f.count)
-        } else {
-            f.label.clone()
-        };
-        let tw = ctx.measure(&label, text::CAPTION);
-        let pw = tw + 2.0 * pad;
-        if px + pw > x + max_w {
-            break;
-        }
+    for ((f, (nw, count, cw)), pw) in filters.iter().zip(&parts).zip(widths) {
         let rect = (px, y, pw, h);
         let (bg, fg) = if f.selected {
             (ctx.pal.raised[2], ctx.pal.fg)
@@ -864,12 +914,20 @@ fn filter_pills(
             )
         };
         ctx.rrect(rect, h / 2.0, bg);
-        ctx.text(&label, px + pad, y, h, text::CAPTION, fg, tw + 1.0);
+        // The name gets what is left after the count (elided if short).
+        let name_w = (pw - 2.0 * pad - *cw).max(0.0).min(*nw + 1.0);
+        ctx.text(&f.label, px + pad, y, h, text::CAPTION, fg, name_w);
+        if !count.is_empty() {
+            let cx = px + pad + name_w + space;
+            ctx.text(count, cx, y, h, text::CAPTION, fg, *cw);
+        }
         ctx.button(rect, f.action.clone());
         px += pw + gap;
     }
 }
 
+/// A list body: "N items" + header chip, then rows (two lines when they
+/// have a subtitle), or the empty text.
 fn list(
     ctx: &mut Ctx<'_>,
     rows: &[Row],
@@ -1086,5 +1144,23 @@ fn buttons(ctx: &mut Ctx<'_>, items: &[(String, Action)], (x, y, w, _h): (f32, f
             tw + 2.0,
         );
         cx += d + gap;
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::fit_widths;
+
+    #[test]
+    fn widths_fit_by_shrinking_only_the_wide_items() {
+        assert_eq!(fit_widths(&[40.0, 60.0], 200.0, 30.0), [40.0, 60.0]);
+        // 40 fits its share; the two wide ones split the rest.
+        assert_eq!(
+            fit_widths(&[40.0, 150.0, 170.0], 200.0, 30.0),
+            [40.0, 80.0, 80.0]
+        );
+        // Never below the minimum, even if that overflows.
+        assert_eq!(fit_widths(&[100.0, 100.0], 40.0, 30.0), [30.0, 30.0]);
+        assert!(fit_widths(&[], 10.0, 5.0).is_empty());
     }
 }

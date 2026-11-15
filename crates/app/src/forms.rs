@@ -157,7 +157,7 @@ pub fn settings_spec(cfg: &Config, monitors: &[Monitor], mail: &MailBoard) -> Fo
                 label: a.name.clone(),
                 detail: format!("{} \u{b7} {} on {}", status.label(), a.username, a.host),
                 ok,
-                action: Some((format!("mail-remove:{i}"), "Remove".into())),
+                action: Some((format!("mail-edit:{i}"), "Edit".into())),
             });
         }
         fields.push(Field::Buttons(vec![(
@@ -187,6 +187,8 @@ pub enum SettingsOutcome {
     Close,
     /// Open the add-mail-account dialog.
     AddMailAccount,
+    /// Open the edit dialog for the mail account at this index.
+    EditMailAccount(usize),
     /// Remove the mail account at this index (and its stored password).
     RemoveMailAccount(usize),
     /// Nothing to do.
@@ -203,6 +205,12 @@ pub fn apply_settings_event(cfg: &Config, monitors: &[Monitor], ev: &FormEvent) 
         FormEvent::Button(id) if id == "close" => return SettingsOutcome::Close,
         FormEvent::Button(id) if id == "open-config" => return SettingsOutcome::OpenConfig,
         FormEvent::Button(id) if id == "mail-add" => return SettingsOutcome::AddMailAccount,
+        FormEvent::Button(id) if id.starts_with("mail-edit:") => {
+            return match id["mail-edit:".len()..].parse() {
+                Ok(i) => SettingsOutcome::EditMailAccount(i),
+                Err(_) => SettingsOutcome::None,
+            };
+        }
         FormEvent::Button(id) if id.starts_with("mail-remove:") => {
             return match id["mail-remove:".len()..].parse() {
                 Ok(i) => SettingsOutcome::RemoveMailAccount(i),
@@ -369,6 +377,9 @@ pub struct MailForm {
     pub host: String,
     /// IMAP port, as typed.
     pub port: String,
+    /// The account being edited (its index), or `None` when adding. Kept by
+    /// the shell, not read back from the dialog.
+    pub editing: Option<usize>,
 }
 
 impl Default for MailForm {
@@ -381,6 +392,7 @@ impl Default for MailForm {
             password: String::new(),
             host: p.host.into(),
             port: p.port.to_string(),
+            editing: None,
         }
     }
 }
@@ -404,6 +416,31 @@ impl MailForm {
             }
         }
         f
+    }
+
+    /// The dialog filled in from a saved account, for editing. The password
+    /// stays empty: left empty, the saved one is kept.
+    pub fn from_account(a: &MailAccount, index: usize) -> Self {
+        let host = a.host.trim().to_ascii_lowercase();
+        let preset = PRESETS
+            .iter()
+            .position(|p| !p.host.is_empty() && p.host == host)
+            .or_else(|| PRESETS.iter().position(|p| p.host.is_empty()))
+            .unwrap_or(0);
+        Self {
+            preset,
+            // A name that is just the address reads as "(optional)" again.
+            name: if a.name == a.username {
+                String::new()
+            } else {
+                a.name.clone()
+            },
+            email: a.username.clone(),
+            password: String::new(),
+            host: a.host.clone(),
+            port: a.port.to_string(),
+            editing: Some(index),
+        }
     }
 
     /// The provider changed: take its server and port ("Other" keeps what
@@ -442,7 +479,17 @@ pub fn mail_account_spec(f: &MailForm, error: Option<&str>) -> FormSpec {
             selected: f.preset.min(PRESETS.len() - 1),
         },
         text("email", "Email address (sign-in name)", &f.email, "you@example.com", false),
-        text("password", "Password", &f.password, hint, true),
+        text(
+            "password",
+            "Password",
+            &f.password,
+            if f.editing.is_some() {
+                "leave empty to keep the saved password"
+            } else {
+                hint
+            },
+            true,
+        ),
         text("name", "Name shown in Perch (optional)", &f.name, "Work", false),
         text("host", "IMAP server", &f.host, "imap.example.com", false),
         text("port", "Port", &f.port, "993", false),
@@ -457,12 +504,25 @@ pub fn mail_account_spec(f: &MailForm, error: Option<&str>) -> FormSpec {
     if let Some(e) = error {
         fields.push(Field::Note(format!("Problem: {e}")));
     }
-    fields.push(Field::Buttons(vec![
-        ("add".into(), "Add account".into()),
-        ("cancel".into(), "Cancel".into()),
-    ]));
+    let editing = f.editing.is_some();
+    fields.push(Field::Buttons(if editing {
+        vec![
+            ("add".into(), "Save".into()),
+            ("remove".into(), "Remove account".into()),
+            ("cancel".into(), "Cancel".into()),
+        ]
+    } else {
+        vec![
+            ("add".into(), "Add account".into()),
+            ("cancel".into(), "Cancel".into()),
+        ]
+    }));
     FormSpec {
-        title: "Add mail account".into(),
+        title: if editing {
+            "Edit mail account".into()
+        } else {
+            "Add mail account".into()
+        },
         fields,
         size: (440, 560),
     }
@@ -477,7 +537,8 @@ pub fn parse_mail_form(
     if email.is_empty() {
         return Err("enter the email address you sign in with".into());
     }
-    if f.password.is_empty() {
+    // Editing: an empty password keeps the saved one.
+    if f.password.is_empty() && f.editing.is_none() {
         return Err("enter the password".into());
     }
     let mut host = f.host.trim().to_ascii_lowercase();
@@ -502,10 +563,11 @@ pub fn parse_mail_form(
         .ok()
         .filter(|p| *p > 0)
         .ok_or("the port must be a number such as 993")?;
-    if existing
-        .iter()
-        .any(|a| a.username.eq_ignore_ascii_case(email) && a.host.eq_ignore_ascii_case(&host))
-    {
+    if existing.iter().enumerate().any(|(i, a)| {
+        Some(i) != f.editing
+            && a.username.eq_ignore_ascii_case(email)
+            && a.host.eq_ignore_ascii_case(&host)
+    }) {
         return Err("that account is already added".into());
     }
     let name = match f.name.trim() {
@@ -517,13 +579,18 @@ pub fn parse_mail_form(
     } else {
         Security::Tls
     };
+    // Editing keeps what the dialog doesn't show (folder, CA file).
+    let base = f
+        .editing
+        .and_then(|i| existing.get(i).cloned())
+        .unwrap_or_default();
     let account = MailAccount {
         name,
         username: email.to_string(),
         host,
         port,
         security,
-        ..MailAccount::default()
+        ..base
     };
     if let Some(p) = account.problem() {
         return Err(p);

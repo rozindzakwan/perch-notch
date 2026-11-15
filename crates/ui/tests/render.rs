@@ -823,3 +823,60 @@ fn a_stripe_shows_only_the_bar_not_the_pill_content() {
         "the normal pill still shows its content"
     );
 }
+
+#[test]
+fn long_account_names_shrink_instead_of_losing_a_tab() {
+    let names = [
+        None,
+        Some("rozin@unusualdope-company-mail.example"),
+        Some("rozindzakwan.long.address@gmail.com"),
+        Some("third.account.with.a.long.name@yahoo.com"),
+    ];
+    let filters: Vec<perch_core::view::ListFilter> = names
+        .iter()
+        .map(|acct| perch_core::view::ListFilter {
+            label: acct.unwrap_or("All").into(),
+            count: 12,
+            selected: acct.is_none(),
+            action: Action::MailFilter(acct.map(Into::into)),
+        })
+        .collect();
+    let view = PanelView {
+        collapsed: CollapsedView::Idle,
+        tabs: vec![Tab::Mail],
+        tab: Some(Tab::Mail),
+        body: Body::List {
+            rows: vec![],
+            empty: String::new(),
+            header: Some(("Mark all read".into(), Action::OpenSettings)),
+            filters,
+        },
+        pinned: false,
+        banner: None,
+    };
+    let mut r = Renderer::new().unwrap_or_else(|e| panic!("{e}"));
+    let mut pm = Pixmap::new(380, 300).unwrap_or_else(|| panic!("pixmap"));
+    let mut frame = Frame::new(380, 300, 1.0, Palette::dark(false));
+    frame.progress = 1.0;
+    let hits = r.draw(&mut pm, &frame, &view);
+    let chip = hits
+        .iter()
+        .find(|h| h.kind == perch_core::view::HitKind::Button(Action::OpenSettings))
+        .unwrap_or_else(|| panic!("header chip"))
+        .clone();
+    let mut right = 0.0_f32;
+    for acct in names {
+        let a = Action::MailFilter(acct.map(Into::into));
+        let h = hits
+            .iter()
+            .find(|h| h.kind == perch_core::view::HitKind::Button(a.clone()))
+            .unwrap_or_else(|| panic!("tab {acct:?} dropped"));
+        assert!(h.x >= right, "in order, not overlapping");
+        right = h.x + h.w;
+    }
+    assert!(
+        right <= chip.x,
+        "tabs end before the chip: {right} vs {}",
+        chip.x
+    );
+}

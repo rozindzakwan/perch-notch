@@ -115,6 +115,8 @@ pub struct Shell {
     dialog: Option<FormWindow>,
     dialog_error: Option<String>,
     dialog_kind: DialogKind,
+    /// The mail account the mail dialog is editing (`None` = adding).
+    mail_editing: Option<usize>,
     #[cfg(feature = "mail")]
     mail: crate::mail::MailHub,
     #[cfg(feature = "mail")]
@@ -199,6 +201,7 @@ impl Shell {
             dialog: None,
             dialog_error: None,
             dialog_kind: DialogKind::Todo,
+            mail_editing: None,
             #[cfg(feature = "mail")]
             mail: Default::default(),
             #[cfg(feature = "mail")]
@@ -915,6 +918,7 @@ impl Shell {
         error: Option<&str>,
     ) {
         let spec = forms::mail_account_spec(form, error);
+        self.mail_editing = form.editing;
         if self.dialog_kind == DialogKind::Mail {
             if let Some(d) = &mut self.dialog {
                 d.replace(spec);
@@ -938,9 +942,17 @@ impl Shell {
             return;
         }
         let account = cfg.mail.accounts.remove(index);
+        // Two accounts can share a password entry (same user and server).
+        let shared = cfg
+            .mail
+            .accounts
+            .iter()
+            .any(|a| a.secret_key() == account.secret_key());
         #[cfg(feature = "mail")]
-        if let Err(e) = self.secrets().delete(&account.secret_key()) {
-            log::warn!("removing the stored mail password: {e}");
+        if !shared {
+            if let Err(e) = self.secrets().delete(&account.secret_key()) {
+                log::warn!("removing the stored mail password: {e}");
+            }
         }
         self.save_config(&cfg);
         self.apply_config(cfg);
@@ -952,7 +964,8 @@ impl Shell {
     fn handle_mail_dialog_event(&mut self, el: &ActiveEventLoop, event: &WindowEvent) {
         let Some(win) = &mut self.dialog else { return };
         let events = win.handle(event);
-        let form = forms::MailForm::from_spec(win.state().spec());
+        let mut form = forms::MailForm::from_spec(win.state().spec());
+        form.editing = self.mail_editing;
         for ev in events {
             match ev {
                 perch_ui::form::FormEvent::Chosen(id, i) if id == "provider" => {
@@ -964,8 +977,10 @@ impl Shell {
                 perch_ui::form::FormEvent::Button(id) if id == "add" => {
                     let parsed = forms::parse_mail_form(&form, &self.model.config().mail.accounts);
                     match parsed {
-                        Ok((account, password)) => match self.save_mail_account(account, &password)
-                        {
+                        Ok((account, password)) => match match form.editing {
+                            Some(i) => self.save_mail_edit(i, account, &password),
+                            None => self.save_mail_account(account, &password),
+                        } {
                             Ok(()) => {
                                 self.dialog = None;
                                 crate::sys::trim_heap();
@@ -975,6 +990,17 @@ impl Shell {
                         },
                         Err(msg) => self.open_mail_dialog(el, &form, Some(&msg)),
                     }
+                }
+                perch_ui::form::FormEvent::Button(id) if id == "remove" => {
+                    if let Some(i) = form.editing {
+                        self.remove_mail_account(i);
+                        if self.settings.is_some() {
+                            self.refresh_settings_form();
+                        }
+                    }
+                    self.dialog = None;
+                    crate::sys::trim_heap();
+                    return;
                 }
                 perch_ui::form::FormEvent::PasteRequested => self.paste_into_dialog(),
                 perch_ui::form::FormEvent::Button(_) | perch_ui::form::FormEvent::Closed => {
@@ -1000,6 +1026,53 @@ impl Shell {
         };
         if let Some(w) = &mut self.dialog {
             w.paste(&text);
+        }
+    }
+
+    /// Save an edited account. A typed password replaces the saved one; an
+    /// empty one keeps it, moved to the new keychain entry when the address
+    /// or server changed. The account then reconnects.
+    fn save_mail_edit(
+        &mut self,
+        index: usize,
+        account: perch_core::config::MailAccount,
+        password: &str,
+    ) -> std::result::Result<(), String> {
+        #[cfg(feature = "mail")]
+        {
+            let mut cfg = self.model.config().clone();
+            let Some(old) = cfg.mail.accounts.get(index).cloned() else {
+                return Err("that account is gone".into());
+            };
+            let secrets = self.secrets();
+            let still_used = cfg
+                .mail
+                .accounts
+                .iter()
+                .enumerate()
+                .any(|(i, a)| i != index && a.secret_key() == old.secret_key());
+            crate::mail::update_password(secrets.as_ref(), &old, &account, password, still_used)?;
+            let name = account.name.clone();
+            let unchanged = old == account;
+            cfg.mail.accounts[index] = account;
+            self.save_config(&cfg);
+            self.apply_config(cfg);
+            if unchanged {
+                // Only the password changed: the watcher would not notice.
+                let report = self.mail_report();
+                self.mail.restart(&name, &secrets, &report);
+            }
+            if self.settings.is_some() {
+                self.refresh_settings_form();
+            }
+            self.model.flash(format!("Saved {name}"), Now::real());
+            self.request_redraw();
+            Ok(())
+        }
+        #[cfg(not(feature = "mail"))]
+        {
+            let _ = (index, account, password);
+            Err("this build has no mail support".into())
         }
     }
 
@@ -1193,6 +1266,12 @@ impl Shell {
                 }
                 SettingsOutcome::AddMailAccount => {
                     self.open_mail_dialog(el, &forms::MailForm::default(), None);
+                }
+                SettingsOutcome::EditMailAccount(i) => {
+                    let acct = self.model.config().mail.accounts.get(i).cloned();
+                    if let Some(a) = acct {
+                        self.open_mail_dialog(el, &forms::MailForm::from_account(&a, i), None);
+                    }
                 }
                 SettingsOutcome::RemoveMailAccount(i) => self.remove_mail_account(i),
                 SettingsOutcome::None => {}

@@ -1444,8 +1444,10 @@ impl Model {
             selected: only.is_none(),
             action: Action::MailFilter(None),
         }];
-        out.extend(accounts.iter().map(|a| ListFilter {
-            label: a.name.clone(),
+        let names: Vec<String> = accounts.iter().map(|a| a.name.clone()).collect();
+        let short = perch_core::mail::short_names(&names);
+        out.extend(accounts.iter().zip(short).map(|(a, label)| ListFilter {
+            label,
             count: a.unread,
             selected: only == Some(a.name.as_str()),
             action: Action::MailFilter(Some(a.name.clone())),
@@ -1533,191 +1535,206 @@ impl Model {
             self.usage.flush(now.unix);
         }
         let tabs = self.tabs();
-        let body =
-            match self.tab {
-                None => Body::Empty("Nothing enabled. Open settings to turn features on.".into()),
-                Some(Tab::Today) => {
-                    let lt = perch_core::clock::LocalTime::at(now.unix as i64, self.utc_offset);
-                    Body::Today(perch_core::view::TodayView {
-                        time: lt.time(),
-                        date: lt.date_long(),
-                        // Off: `None`, and the tab says how to turn it on.
-                        location: self.is_active(Feature::Location).then(|| {
-                            match (&self.location, self.location_failed) {
-                                (Some(p), _) => p.clone(),
-                                (None, true) => {
-                                    "Location unavailable: check the system's location setting"
-                                        .into()
-                                }
-                                (None, false) => "Finding where you are\u{2026}".into(),
+        let body = match self.tab {
+            None => Body::Empty("Nothing enabled. Open settings to turn features on.".into()),
+            Some(Tab::Today) => {
+                let lt = perch_core::clock::LocalTime::at(now.unix as i64, self.utc_offset);
+                Body::Today(perch_core::view::TodayView {
+                    time: lt.time(),
+                    date: lt.date_long(),
+                    // Off: `None`, and the tab says how to turn it on.
+                    location: self.is_active(Feature::Location).then(|| {
+                        match (&self.location, self.location_failed) {
+                            (Some(p), _) => p.clone(),
+                            (None, true) => {
+                                "Location unavailable: check the system's location setting".into()
                             }
-                        }),
+                            (None, false) => "Finding where you are\u{2026}".into(),
+                        }
+                    }),
+                })
+            }
+            Some(Tab::Media) => Body::Media(self.media_view(now)),
+            Some(Tab::Tasks) => Body::Tasks(self.tasks_view(now)),
+            Some(Tab::Clipboard) => Body::List {
+                rows: self
+                    .clipboard
+                    .iter()
+                    .skip(self.scroll)
+                    .map(|e| Row {
+                        text: match e.content() {
+                            ClipboardContent::Text { .. } => e
+                                .as_text()
+                                .unwrap_or_default()
+                                .replace(['\n', '\r', '\t'], " "),
+                            other => format!("Image ({} KB)", other.byte_len() / 1024),
+                        },
+                        detail: ago(now.unix, e.captured_at()),
+                        check: None,
+                        primary: Some(Action::ClipCopy(e.id())),
+                        remove: Some(Action::ClipRemove(e.id())),
+                        dim: false,
+                        leading: match e.content() {
+                            ClipboardContent::Text { .. } => {
+                                let t = e.as_text().unwrap_or_default();
+                                let t = t.trim_start();
+                                if t.starts_with("http://") || t.starts_with("https://") {
+                                    RowLeading::Kind(RowKind::Link)
+                                } else {
+                                    RowLeading::Kind(RowKind::Text)
+                                }
+                            }
+                            _ => match self.clip_thumbs.get(&e.id().0) {
+                                Some((px, side)) => RowLeading::Thumb(px.clone(), *side),
+                                None => RowLeading::Kind(RowKind::Image),
+                            },
+                        },
+                        subtitle: None,
+                        chip: Some(("Copy".into(), Action::ClipCopy(e.id()))),
                     })
+                    .collect(),
+                empty: "Copy something and it shows up here.".into(),
+                header: (!self.clipboard.is_empty()).then(|| ("Clear".into(), Action::ClipClear)),
+                filters: Vec::new(),
+            },
+            Some(Tab::Shelf) => Body::List {
+                rows: self
+                    .shelf
+                    .items()
+                    .iter()
+                    .skip(self.scroll)
+                    .map(|i| Row {
+                        text: i.name.clone(),
+                        detail: if i.is_dir {
+                            "folder".into()
+                        } else {
+                            "copy".into()
+                        },
+                        check: None,
+                        primary: Some(Action::ShelfCopy(i.id)),
+                        remove: Some(Action::ShelfRemove(i.id)),
+                        dim: false,
+                        leading: RowLeading::Kind(if i.is_dir {
+                            RowKind::Folder
+                        } else {
+                            RowKind::File
+                        }),
+                        subtitle: None,
+                        chip: Some(("Copy".into(), Action::ShelfCopy(i.id))),
+                    })
+                    .collect(),
+                empty: "Drop files here to park them.".into(),
+                header: (!self.shelf.is_empty()).then(|| ("Clear".into(), Action::ShelfClear)),
+                filters: Vec::new(),
+            },
+            Some(Tab::Mixer) => Body::Sliders {
+                rows: self
+                    .sessions
+                    .iter()
+                    .skip(self.scroll)
+                    .map(|s| SliderRow {
+                        label: s.name.clone(),
+                        value: s.volume,
+                        on: !s.muted,
+                        target: SliderTarget::Volume(s.id.clone()),
+                        toggle: Action::MuteToggle(s.id.clone()),
+                        leading: match perch_core::view::app_colour(&s.name) {
+                            _ if s.id == perch_core::platform::SYSTEM_VOLUME_ID => {
+                                RowLeading::Kind(perch_core::view::RowKind::Speaker)
+                            }
+                            Some(rgb) => RowLeading::Disc {
+                                initials: perch_core::view::initials(&s.name),
+                                rgb,
+                            },
+                            None => RowLeading::Avatar {
+                                initials: perch_core::view::initials(&s.name),
+                                seed: perch_core::view::seed(&s.name),
+                            },
+                        },
+                    })
+                    .collect(),
+                empty: "No app is playing sound.".into(),
+            },
+            Some(Tab::Sounds) => Body::Sliders {
+                rows: NoiseKind::ALL
+                    .iter()
+                    .map(|k| SliderRow {
+                        label: k.label().into(),
+                        value: self.noise.level(*k),
+                        on: self.noise.is_on(*k),
+                        target: SliderTarget::Noise(*k),
+                        toggle: Action::NoiseToggle(*k),
+                        leading: RowLeading::Kind(RowKind::Sound),
+                    })
+                    .collect(),
+                empty: String::new(),
+            },
+            Some(Tab::Time) => {
+                let day = DayId::from_unix(now.unix, local_offset());
+                let top = self.usage.aggregate().top_apps(day, 5);
+                let max = top.first().map(|(_, s)| *s).unwrap_or(1).max(1);
+                Body::Usage {
+                    total: format!(
+                        "Today {}",
+                        human_duration(self.usage.aggregate().grand_total(day))
+                    ),
+                    bars: top
+                        .into_iter()
+                        .map(|(app, secs)| UsageBar {
+                            label: human_duration(secs),
+                            fraction: secs as f32 / max as f32,
+                            app,
+                        })
+                        .collect(),
                 }
-                Some(Tab::Media) => Body::Media(self.media_view(now)),
-                Some(Tab::Tasks) => Body::Tasks(self.tasks_view(now)),
-                Some(Tab::Clipboard) => Body::List {
-                    rows: self
-                        .clipboard
-                        .iter()
+            }
+            Some(Tab::Mail) => {
+                let mut rows: Vec<Row> = self
+                    .mail
+                    .accounts()
+                    .iter()
+                    .filter(|a| a.status.is_problem())
+                    .filter(|a| self.mail_account().is_none_or(|n| n == a.name))
+                    .map(|a| Row {
+                        text: format!("{}: {}", a.name, a.status.label()),
+                        detail: String::new(),
+                        check: None,
+                        primary: Some(Action::OpenSettings),
+                        remove: None,
+                        dim: true,
+                        leading: RowLeading::Kind(RowKind::Warning),
+                        subtitle: None,
+                        chip: None,
+                    })
+                    .collect();
+                // The account name only helps on the "All" tab.
+                let several = self.mail.accounts().len() > 1 && self.mail_account().is_none();
+                let can_mark = self.can_mark_read();
+                // The same short names as the tabs ("Gmail", not the address).
+                let names: Vec<String> = self
+                    .mail
+                    .accounts()
+                    .iter()
+                    .map(|a| a.name.clone())
+                    .collect();
+                let short: std::collections::HashMap<String, String> = names
+                    .iter()
+                    .cloned()
+                    .zip(perch_core::mail::short_names(&names))
+                    .collect();
+                let label = |acct: &str| short.get(acct).cloned().unwrap_or_else(|| acct.into());
+                rows.extend(
+                    self.mail_items()
+                        .into_iter()
                         .skip(self.scroll)
-                        .map(|e| Row {
-                            text: match e.content() {
-                                ClipboardContent::Text { .. } => e
-                                    .as_text()
-                                    .unwrap_or_default()
-                                    .replace(['\n', '\r', '\t'], " "),
-                                other => format!("Image ({} KB)", other.byte_len() / 1024),
-                            },
-                            detail: ago(now.unix, e.captured_at()),
-                            check: None,
-                            primary: Some(Action::ClipCopy(e.id())),
-                            remove: Some(Action::ClipRemove(e.id())),
-                            dim: false,
-                            leading: match e.content() {
-                                ClipboardContent::Text { .. } => {
-                                    let t = e.as_text().unwrap_or_default();
-                                    let t = t.trim_start();
-                                    if t.starts_with("http://") || t.starts_with("https://") {
-                                        RowLeading::Kind(RowKind::Link)
-                                    } else {
-                                        RowLeading::Kind(RowKind::Text)
-                                    }
-                                }
-                                _ => match self.clip_thumbs.get(&e.id().0) {
-                                    Some((px, side)) => RowLeading::Thumb(px.clone(), *side),
-                                    None => RowLeading::Kind(RowKind::Image),
-                                },
-                            },
-                            subtitle: None,
-                            chip: Some(("Copy".into(), Action::ClipCopy(e.id()))),
-                        })
-                        .collect(),
-                    empty: "Copy something and it shows up here.".into(),
-                    header: (!self.clipboard.is_empty())
-                        .then(|| ("Clear".into(), Action::ClipClear)),
-                    filters: Vec::new(),
-                },
-                Some(Tab::Shelf) => Body::List {
-                    rows: self
-                        .shelf
-                        .items()
-                        .iter()
-                        .skip(self.scroll)
-                        .map(|i| Row {
-                            text: i.name.clone(),
-                            detail: if i.is_dir {
-                                "folder".into()
-                            } else {
-                                "copy".into()
-                            },
-                            check: None,
-                            primary: Some(Action::ShelfCopy(i.id)),
-                            remove: Some(Action::ShelfRemove(i.id)),
-                            dim: false,
-                            leading: RowLeading::Kind(if i.is_dir {
-                                RowKind::Folder
-                            } else {
-                                RowKind::File
-                            }),
-                            subtitle: None,
-                            chip: Some(("Copy".into(), Action::ShelfCopy(i.id))),
-                        })
-                        .collect(),
-                    empty: "Drop files here to park them.".into(),
-                    header: (!self.shelf.is_empty()).then(|| ("Clear".into(), Action::ShelfClear)),
-                    filters: Vec::new(),
-                },
-                Some(Tab::Mixer) => Body::Sliders {
-                    rows: self
-                        .sessions
-                        .iter()
-                        .skip(self.scroll)
-                        .map(|s| SliderRow {
-                            label: s.name.clone(),
-                            value: s.volume,
-                            on: !s.muted,
-                            target: SliderTarget::Volume(s.id.clone()),
-                            toggle: Action::MuteToggle(s.id.clone()),
-                            leading: match perch_core::view::app_colour(&s.name) {
-                                _ if s.id == perch_core::platform::SYSTEM_VOLUME_ID => {
-                                    RowLeading::Kind(perch_core::view::RowKind::Speaker)
-                                }
-                                Some(rgb) => RowLeading::Disc {
-                                    initials: perch_core::view::initials(&s.name),
-                                    rgb,
-                                },
-                                None => RowLeading::Avatar {
-                                    initials: perch_core::view::initials(&s.name),
-                                    seed: perch_core::view::seed(&s.name),
-                                },
-                            },
-                        })
-                        .collect(),
-                    empty: "No app is playing sound.".into(),
-                },
-                Some(Tab::Sounds) => Body::Sliders {
-                    rows: NoiseKind::ALL
-                        .iter()
-                        .map(|k| SliderRow {
-                            label: k.label().into(),
-                            value: self.noise.level(*k),
-                            on: self.noise.is_on(*k),
-                            target: SliderTarget::Noise(*k),
-                            toggle: Action::NoiseToggle(*k),
-                            leading: RowLeading::Kind(RowKind::Sound),
-                        })
-                        .collect(),
-                    empty: String::new(),
-                },
-                Some(Tab::Time) => {
-                    let day = DayId::from_unix(now.unix, local_offset());
-                    let top = self.usage.aggregate().top_apps(day, 5);
-                    let max = top.first().map(|(_, s)| *s).unwrap_or(1).max(1);
-                    Body::Usage {
-                        total: format!(
-                            "Today {}",
-                            human_duration(self.usage.aggregate().grand_total(day))
-                        ),
-                        bars: top
-                            .into_iter()
-                            .map(|(app, secs)| UsageBar {
-                                label: human_duration(secs),
-                                fraction: secs as f32 / max as f32,
-                                app,
-                            })
-                            .collect(),
-                    }
-                }
-                Some(Tab::Mail) => {
-                    let mut rows: Vec<Row> = self
-                        .mail
-                        .accounts()
-                        .iter()
-                        .filter(|a| a.status.is_problem())
-                        .filter(|a| self.mail_account().is_none_or(|n| n == a.name))
-                        .map(|a| Row {
-                            text: format!("{}: {}", a.name, a.status.label()),
-                            detail: String::new(),
-                            check: None,
-                            primary: Some(Action::OpenSettings),
-                            remove: None,
-                            dim: true,
-                            leading: RowLeading::Kind(RowKind::Warning),
-                            subtitle: None,
-                            chip: None,
-                        })
-                        .collect();
-                    // The account name only helps on the "All" tab.
-                    let several = self.mail.accounts().len() > 1 && self.mail_account().is_none();
-                    let can_mark = self.can_mark_read();
-                    rows.extend(self.mail_items().into_iter().skip(self.scroll).map(
-                        |(acct, m)| Row {
+                        .map(|(acct, m)| Row {
                             text: m.from.clone(),
                             detail: match (m.date_unix, several) {
-                                (Some(t), true) => format!("{acct} \u{00b7} {}", ago(now.unix, t)),
+                                (Some(t), true) => {
+                                    format!("{} \u{00b7} {}", label(acct), ago(now.unix, t))
+                                }
                                 (Some(t), false) => ago(now.unix, t),
-                                (None, true) => acct.to_string(),
+                                (None, true) => label(acct),
                                 (None, false) => String::new(),
                             },
                             check: None,
@@ -1739,61 +1756,62 @@ impl Model {
                                     },
                                 )
                             }),
-                        },
-                    ));
-                    // "Mark all read" for the account on screen (its own tab, or
-                    // the only account); otherwise the Accounts shortcut.
-                    let shown_account = self.mail_account().map(str::to_string).or_else(|| {
-                        match self.mail.accounts() {
-                            [only] => Some(only.name.clone()),
-                            _ => None,
-                        }
+                        }),
+                );
+                // "Mark all read" for the account on screen (its own tab, or
+                // the only account); otherwise the Accounts shortcut.
+                let shown_account = self
+                    .mail_account()
+                    .map(str::to_string)
+                    .or_else(|| match self.mail.accounts() {
+                        [only] => Some(only.name.clone()),
+                        _ => None,
                     });
-                    let header = match shown_account {
-                        Some(name)
-                            if can_mark
-                                && self
-                                    .mail
-                                    .accounts()
-                                    .iter()
-                                    .any(|a| a.name == name && a.unread > 0) =>
-                        {
-                            ("Mark all read".to_string(), Action::MailMarkAllRead(name))
-                        }
-                        _ => ("Accounts".to_string(), Action::OpenSettings),
-                    };
-                    let connecting = self
-                        .mail
-                        .accounts()
-                        .iter()
-                        .any(|a| a.status == perch_core::mail::AccountStatus::Connecting);
-                    Body::List {
-                        rows,
-                        empty: if self.config.mail.accounts.is_empty() {
-                            "Add a mail account in settings.".into()
-                        } else if connecting {
-                            "Connecting\u{2026}".into()
-                        } else {
-                            "No unread mail.".into()
-                        },
-                        header: Some(header),
-                        filters: self.mail_filters(),
+                let header = match shown_account {
+                    Some(name)
+                        if can_mark
+                            && self
+                                .mail
+                                .accounts()
+                                .iter()
+                                .any(|a| a.name == name && a.unread > 0) =>
+                    {
+                        ("Mark all read".to_string(), Action::MailMarkAllRead(name))
                     }
+                    _ => ("Accounts".to_string(), Action::OpenSettings),
+                };
+                let connecting = self
+                    .mail
+                    .accounts()
+                    .iter()
+                    .any(|a| a.status == perch_core::mail::AccountStatus::Connecting);
+                Body::List {
+                    rows,
+                    empty: if self.config.mail.accounts.is_empty() {
+                        "Add a mail account in settings.".into()
+                    } else if connecting {
+                        "Connecting\u{2026}".into()
+                    } else {
+                        "No unread mail.".into()
+                    },
+                    header: Some(header),
+                    filters: self.mail_filters(),
                 }
-                Some(Tab::Tools) => {
-                    let mut b = Vec::new();
-                    if self.is_active(Feature::Screenshot) {
-                        b.push(("Screenshot".to_string(), Action::Screenshot));
-                    }
-                    if self.is_active(Feature::CameraMirror) {
-                        b.push(("Mirror".to_string(), Action::CameraToggle));
-                    }
-                    if self.is_active(Feature::SpeechToText) {
-                        b.push(("Dictate".to_string(), Action::DictateToggle));
-                    }
-                    Body::Buttons(b)
+            }
+            Some(Tab::Tools) => {
+                let mut b = Vec::new();
+                if self.is_active(Feature::Screenshot) {
+                    b.push(("Screenshot".to_string(), Action::Screenshot));
                 }
-            };
+                if self.is_active(Feature::CameraMirror) {
+                    b.push(("Mirror".to_string(), Action::CameraToggle));
+                }
+                if self.is_active(Feature::SpeechToText) {
+                    b.push(("Dictate".to_string(), Action::DictateToggle));
+                }
+                Body::Buttons(b)
+            }
+        };
         PanelView {
             collapsed: self.collapsed(),
             tabs,

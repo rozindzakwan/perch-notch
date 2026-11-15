@@ -19,7 +19,7 @@ Environments:
 | `cargo fmt --all --check` | Windows, container | clean |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Windows (default features; GNU can't build `speech`) | clean (0 warnings) |
 | `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` | container | clean (0 warnings) |
-| `cargo test --workspace` | Windows | 422 passed, 0 failed, 8 ignored (opt-in hardware tests, run separately below, the release-only render budget, and the real-server mail test that `mail-test.sh` runs) |
+| `cargo test --workspace` | Windows | 429 passed, 0 failed, 8 ignored (opt-in hardware tests, run separately below, the release-only render budget, and the real-server mail test that `mail-test.sh` runs) |
 | `cargo test --release -p perch-ui --test budget` | Windows | settled Music panel: **1.9 ms at 1×, 6.5 ms at 2×** (budgets 4 / 8 ms) |
 | `cargo test --workspace --all-features --locked` | container | all passed, 0 failed |
 | `cargo audit` | Windows | 0 vulnerabilities; 7 warnings: 6 unmaintained crates (paste, proc-macro-error, ttf-parser, zbus_names, zvariant, zvariant_derive) and `glib` 0.18 "unsound", which is only in the lockfile through `tray-icon`'s Linux GTK deps and is never compiled (tray-icon is Windows-only here; Linux uses ksni) |
@@ -262,6 +262,17 @@ Not automated, on purpose: the live location lookup (Windows `Geolocator` /
 GeoClue, then Nominatim), because it would send this machine's position to
 an outside service; reading a real app's logo and opening it through
 `shell:AppsFolder` on Windows; `gtk-launch` on Linux.
+
+## 3e. Mail: account tabs that fit, editing accounts, the right server
+
+| Test | Where | Result |
+|---|---|---|
+| core `short_names`: "rozin@unusualdope.com" / "rozindzakwan@gmail.com" give "Unusualdope" / "Gmail"; two on one domain give the part before the @; names the user chose are kept | both | passed |
+| ui `fit_widths`: everything fits as is; otherwise narrow tabs keep their width and wide ones share the rest, never below a minimum | both | passed |
+| render: four tabs with long addresses and a "Mark all read" chip: every tab is a button, in order, none overlapping, all before the chip (they used to be dropped once the row was full, which hid the second account) | both | passed |
+| forms: an account row's button is **Edit**; the dialog comes back filled in with the password empty and Save / Remove account / Cancel; saving with an empty password keeps it, keeps the folder and CA file, is not a duplicate of itself but is of another account; adding still needs a password | both | passed |
+| `update_password` (in-memory keychain): an empty password moves to the new entry when the server changed and the old entry goes; a typed one replaces it; a rename touches nothing; a shared entry is copied, not removed; nothing saved to keep is an error | both | passed |
+| forms / core: a `@gmail.com` address left on the default Spacemail server is saved with `imap.gmail.com` (also Yahoo, iCloud); a company address stays; a custom server is kept; an account already saved that way reports "wrong server" before connecting | both | passed |
 
 ## 3d. Mail: mark as read (opt-in)
 

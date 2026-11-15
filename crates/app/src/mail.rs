@@ -749,6 +749,41 @@ fn idle(conn: &mut Conn, ctl: &Ctl) -> SessResult<()> {
     conn.finish(&tag, SessErr::Fail, &mut |_| {})
 }
 
+/// Keep the keychain in step with an edited account. A typed `password`
+/// replaces the saved one; an empty one keeps it, moved to the new entry
+/// when the sign-in name or server (the entry's key) changed. The old entry
+/// is removed unless another account still uses it.
+pub fn update_password(
+    secrets: &dyn SecretStore,
+    old: &MailAccount,
+    new: &MailAccount,
+    password: &str,
+    old_still_used: bool,
+) -> Result<(), String> {
+    let (old_key, new_key) = (old.secret_key(), new.secret_key());
+    let label = format!("Perch mail: {}", new.username.trim());
+    if !password.is_empty() {
+        secrets
+            .set(&new_key, &label, password)
+            .map_err(|e| format!("could not save the password: {e}"))?;
+    } else if old_key != new_key {
+        let kept = secrets
+            .get(&old_key)
+            .map_err(|e| format!("could not read the saved password: {e}"))?
+            .filter(|p| !p.is_empty())
+            .ok_or("no saved password to keep: enter the password")?;
+        secrets
+            .set(&new_key, &label, &kept)
+            .map_err(|e| format!("could not save the password: {e}"))?;
+    }
+    if old_key != new_key && !old_still_used {
+        if let Err(e) = secrets.delete(&old_key) {
+            log::warn!("removing the old mail password entry: {e}");
+        }
+    }
+    Ok(())
+}
+
 /// The `UID STORE` set for a mark: these UIDs (`1,5,9`), or every message
 /// (`1:*`; read ones are unaffected). `None` for an empty list. Pure.
 pub fn store_set(uids: Option<&[u32]>) -> Option<String> {

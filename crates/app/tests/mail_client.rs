@@ -577,3 +577,63 @@ fn marks_one_message_read_on_a_real_server() {
     });
     println!("marked uid {uid} read; unread {unread} -> {}", unread - 1);
 }
+
+#[test]
+fn editing_an_account_moves_or_replaces_its_saved_password() {
+    use perch_app::mail::update_password;
+    let old = MailAccount {
+        name: "me@gmail.com".into(),
+        username: "me@gmail.com".into(),
+        host: "mail.spacemail.com".into(),
+        ..MailAccount::default()
+    };
+    let fixed = MailAccount {
+        name: "Gmail".into(),
+        host: "imap.gmail.com".into(),
+        ..old.clone()
+    };
+    // Empty password, server changed: the saved one moves to the new entry.
+    let s = MemorySecrets::default();
+    let _ = s.set(&old.secret_key(), "x", "app-pw");
+    assert_eq!(update_password(&s, &old, &fixed, "", false), Ok(()));
+    assert_eq!(
+        s.get(&fixed.secret_key()).ok().flatten().as_deref(),
+        Some("app-pw")
+    );
+    assert_eq!(
+        s.get(&old.secret_key()).ok().flatten(),
+        None,
+        "old entry removed"
+    );
+
+    // A typed password replaces it.
+    assert_eq!(update_password(&s, &fixed, &fixed, "new-pw", false), Ok(()));
+    assert_eq!(
+        s.get(&fixed.secret_key()).ok().flatten().as_deref(),
+        Some("new-pw")
+    );
+
+    // Only the name changed and the password left empty: nothing to do.
+    let renamed = MailAccount {
+        name: "Personal".into(),
+        ..fixed.clone()
+    };
+    assert_eq!(update_password(&s, &fixed, &renamed, "", false), Ok(()));
+    assert_eq!(
+        s.get(&fixed.secret_key()).ok().flatten().as_deref(),
+        Some("new-pw")
+    );
+
+    // An entry another account shares is copied, not removed.
+    let shared = MemorySecrets::default();
+    let _ = shared.set(&old.secret_key(), "x", "pw");
+    assert_eq!(update_password(&shared, &old, &fixed, "", true), Ok(()));
+    assert_eq!(
+        shared.get(&old.secret_key()).ok().flatten().as_deref(),
+        Some("pw")
+    );
+
+    // Nothing saved to keep: say so.
+    let empty = MemorySecrets::default();
+    assert!(update_password(&empty, &old, &fixed, "", false).is_err());
+}

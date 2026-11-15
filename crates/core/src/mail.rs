@@ -226,6 +226,40 @@ impl MailBoard {
     }
 }
 
+/// Short tab names for accounts. A name that is a whole address (the
+/// default) becomes its domain ("rozin@gmail.com" -> "Gmail"), or the part
+/// before the @ when another account has the same domain; any other name
+/// is kept as the user typed it. Pure.
+pub fn short_names(names: &[String]) -> Vec<String> {
+    let stem = |n: &str| -> Option<String> {
+        let (local, domain) = n.trim().rsplit_once('@')?;
+        if local.is_empty() || domain.is_empty() {
+            return None;
+        }
+        let first = domain.split('.').next().unwrap_or(domain);
+        let mut c = first.chars();
+        Some(
+            c.next()
+                .map(|h| h.to_uppercase().chain(c).collect())
+                .unwrap_or_default(),
+        )
+    };
+    let stems: Vec<Option<String>> = names.iter().map(|n| stem(n)).collect();
+    names
+        .iter()
+        .zip(&stems)
+        .map(|(n, s)| match s {
+            Some(s) if stems.iter().filter(|o| o.as_ref() == Some(s)).count() == 1 => s.clone(),
+            Some(_) => n
+                .trim()
+                .rsplit_once('@')
+                .map(|(l, _)| l.to_string())
+                .unwrap_or_default(),
+            None => n.clone(),
+        })
+        .collect()
+}
+
 /// How to secure the connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -573,6 +607,22 @@ mod tests {
         assert_eq!(b.total_unread(), 1);
         // A message marked unread again (lower UID) is not "new".
         assert!(b.apply(snap(7, &[2, 5])).is_empty());
+    }
+
+    #[test]
+    fn account_tabs_get_short_names() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            short_names(&s(&["rozin@unusualdope.com", "rozindzakwan@gmail.com"])),
+            ["Unusualdope", "Gmail"]
+        );
+        // Same domain: the part before the @.
+        assert_eq!(
+            short_names(&s(&["ann@gmail.com", "bob@gmail.com", "Work"])),
+            ["ann", "bob", "Work"]
+        );
+        // Names the user chose are kept.
+        assert_eq!(short_names(&s(&["Work", "Home"])), ["Work", "Home"]);
     }
 
     #[test]

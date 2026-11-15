@@ -243,10 +243,10 @@ fn mail_account_rows_show_status() {
     assert!(rows[0].0.contains("Work"));
     assert!(rows[0].1.contains("sign-in failed"), "{:?}", rows[0]);
     assert_eq!(rows[0].2, Some(false));
-    assert_eq!(rows[0].3, Some("mail-remove:0"));
+    assert_eq!(rows[0].3, Some("mail-edit:0"));
     assert!(rows[1].1.contains("connecting"), "{:?}", rows[1]);
     assert_eq!(rows[1].2, None, "still connecting: neither ok nor failed");
-    assert_eq!(rows[1].3, Some("mail-remove:1"));
+    assert_eq!(rows[1].3, Some("mail-edit:1"));
 }
 
 #[test]
@@ -276,4 +276,81 @@ fn gmail_app_passwords_work_with_the_spaces_google_shows() {
     f.password = "abcd efgh ijkl mnop".into();
     let (_, password) = parse_mail_form(&f, &[]).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(password, "abcdefghijklmnop");
+}
+
+#[test]
+fn a_mail_account_can_be_edited_and_an_empty_password_keeps_the_saved_one() {
+    use perch_app::forms::{mail_account_spec, parse_mail_form, MailForm};
+    use perch_core::config::MailAccount;
+    use perch_core::mail::Security;
+    let saved = vec![
+        MailAccount {
+            name: "rozin@company.example".into(),
+            username: "rozin@company.example".into(),
+            host: "mail.spacemail.com".into(),
+            port: 993,
+            ..MailAccount::default()
+        },
+        MailAccount {
+            name: "me@gmail.com".into(),
+            username: "me@gmail.com".into(),
+            host: "mail.spacemail.com".into(),
+            port: 993,
+            folder: "Inbox/Important".into(),
+            ca_file: "C:/certs/ca.pem".into(),
+            security: Security::Tls,
+        },
+    ];
+    // Settings' account rows open the editor.
+    let cfg = Config::default();
+    let out = apply_settings_event(&cfg, &monitors(), &FormEvent::Button("mail-edit:1".into()));
+    assert_eq!(out, SettingsOutcome::EditMailAccount(1));
+
+    // The dialog comes back filled in, password empty, Save / Remove.
+    let f = MailForm::from_account(&saved[1], 1);
+    assert_eq!(f.email, "me@gmail.com");
+    assert_eq!(
+        f.name, "",
+        "a name that is just the address shows as optional"
+    );
+    assert_eq!(f.password, "");
+    let spec = mail_account_spec(&f, None);
+    assert_eq!(spec.title, "Edit mail account");
+    let buttons: Vec<&str> = spec
+        .fields
+        .iter()
+        .find_map(|x| match x {
+            Field::Buttons(b) => Some(b.iter().map(|(id, _)| id.as_str()).collect()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    assert_eq!(buttons, ["add", "remove", "cancel"]);
+
+    // Fix the server and rename, without retyping the password.
+    let mut edited = f.clone();
+    edited.host = "imap.gmail.com".into();
+    edited.name = "Gmail".into();
+    let (a, pw) = parse_mail_form(&edited, &saved).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(pw, "", "empty: keep the saved password");
+    assert_eq!(
+        (a.name.as_str(), a.host.as_str()),
+        ("Gmail", "imap.gmail.com")
+    );
+    assert_eq!(
+        a.folder, "Inbox/Important",
+        "what the dialog doesn't show is kept"
+    );
+    assert_eq!(a.ca_file, "C:/certs/ca.pem");
+    // Saving it unchanged is not a duplicate of itself...
+    assert!(parse_mail_form(&f, &saved).is_ok());
+    // ...but becoming another saved account is.
+    let mut clash = f.clone();
+    clash.email = "rozin@company.example".into();
+    clash.host = "mail.spacemail.com".into();
+    assert!(parse_mail_form(&clash, &saved).is_err());
+    // Adding (not editing) still needs a password.
+    let mut adding = edited.clone();
+    adding.editing = None;
+    adding.email = "new@gmail.com".into();
+    assert!(parse_mail_form(&adding, &saved).is_err());
 }

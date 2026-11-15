@@ -286,8 +286,16 @@ Other), type your address and password, and click **Add account**. Perch saves
 the password to the system keychain and the rest to the config. The Mail tab
 then shows "connecting…" and, a moment later, your unread mail. If sign-in
 fails, the tab says so and Perch **stops trying**, so a wrong password can't
-get your account locked. Fix the password with **Remove** and add the account
-again, or with `perch mail-password <name>` followed by `perch mail-retry`.
+get your account locked. To fix it, click **Edit** next to the account in
+settings: change the address, server, port or name, and type a new password
+or leave the password empty to keep the saved one (it moves with the account
+if the address or server changed). Saving reconnects the account. **Remove
+account** is in the same dialog. From a terminal, `perch mail-password <name>`
+followed by `perch mail-retry` also replaces a password.
+
+With several accounts the Mail tab has a tab per account. An account named
+after its address shows as its domain ("Gmail", or the part before the @
+when two share a domain); long names are shortened, and no tab is left out.
 
 - **Gmail / Google Workspace:** use an *app password* (Google Account →
   Security → 2-Step Verification → App passwords). Your normal password won't
