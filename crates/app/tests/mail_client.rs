@@ -487,7 +487,11 @@ fn marking_read_sets_only_the_seen_flag_over_its_own_connection() {
     }
     assert_eq!(server.connections.lock().map(|n| *n).unwrap_or(0), 1);
 
-    // "Mark all read" covers every message of the folder.
+    // "Mark all read" asks which messages are unread and marks just those
+    // (never `1:*`, which makes a big Gmail mailbox touch every message).
+    if let Ok(mut u) = server.unseen.lock() {
+        u.extend([7, 9]);
+    }
     assert_eq!(mark(&acct, 42, None), Ok(()));
     assert!(server.unseen.lock().map(|u| u.is_empty()).unwrap_or(false));
     let cmds = server
@@ -497,9 +501,10 @@ fn marking_read_sets_only_the_seen_flag_over_its_own_connection() {
         .unwrap_or_default();
     assert!(
         cmds.iter()
-            .any(|c| c == r"UID STORE 1:* +FLAGS.SILENT (\Seen)"),
+            .any(|c| c == r"UID STORE 3,7,9 +FLAGS.SILENT (\Seen)"),
         "{cmds:?}"
     );
+    assert!(!cmds.iter().any(|c| c.contains("1:*")), "{cmds:?}");
 }
 
 #[test]

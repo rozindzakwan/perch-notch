@@ -281,7 +281,7 @@ an outside service; reading a real app's logo and opening it through
 | core `MailBoard`: marking locally drops the rows and the count, unknown UIDs and accounts do nothing, the server's next snapshot is the truth and is not announced as new mail | both | passed |
 | model: off by default (no buttons, the action is ignored); on: each row's hover chip is "Mark read", the header is "Mark all read" for the account on screen; a click removes the row at once and asks for `MailMarkRead` with the account's UIDVALIDITY; a refusal flashes a message and reconnects the account; mark all asks for every unread message | both | passed |
 | model: the new-mail banner names the account when there are several | both | passed |
-| client against the scripted server: `SELECT`, `UID STORE 5 +FLAGS.SILENT (\Seen)`, `LOGOUT` on one connection, never `CLOSE`/`EXPUNGE`/`COPY`/`MOVE`; mark all is `UID STORE 1:*`; a changed UIDVALIDITY sends no `STORE`; a wrong password is an error, not a retry | both | passed |
+| client against the scripted server: `SELECT`, `UID STORE 5 +FLAGS.SILENT (\Seen)`, `LOGOUT` on one connection, never `CLOSE`/`EXPUNGE`/`COPY`/`MOVE`; mark all searches `UNSEEN` and marks only those UIDs (never `1:*`, which made a big Gmail mailbox time out); a changed UIDVALIDITY sends no `STORE`; a wrong password is an error, not a retry | both | passed |
 | `mail-test.sh` against Dovecot: the read-only watcher lists the mail, one message is marked read, the watcher sees it through IDLE; `doveadm` then finds exactly **1** `\Seen` message, none deleted, none missing; Perch's own running sessions drop from 6 to 4 unread (both accounts read that mailbox) | container | passed |
 
 ## 3b. Mail (read-only IMAP)

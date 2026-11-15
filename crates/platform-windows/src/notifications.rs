@@ -19,6 +19,7 @@ use std::time::Duration;
 use perch_core::error::{Error, Result};
 use perch_core::mirror::SeenNotifications;
 use perch_core::platform::{EventSink, ForeignNotification, PlatformEvent};
+use windows::core::Interface;
 use windows::Storage::Streams::DataReader;
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
 use windows::UI::Notifications::Management::{
@@ -31,6 +32,15 @@ pub const CHECK_EVERY: Duration = Duration::from_secs(1);
 
 /// Our own toasts are already banners.
 const OWN_APP: &str = "Perch";
+
+/// Longest wait for the person to answer Windows' access prompt.
+const ACCESS_LIMIT: Duration = Duration::from_secs(60);
+/// Longest wait for the notification list.
+const READ_LIMIT: Duration = Duration::from_secs(5);
+/// Longest wait for one app's logo.
+const LOGO_LIMIT: Duration = Duration::from_secs(2);
+/// Longest wait for the worker to finish when the mirror is stopped.
+const STOP_LIMIT: Duration = Duration::from_secs(2);
 
 /// The running mirror; dropping it stops the worker.
 pub struct NotificationMirror {
@@ -119,7 +129,18 @@ impl Drop for NotificationMirror {
     fn drop(&mut self) {
         self.stop.take();
         if let Some(t) = self.thread.take() {
-            let _ = t.join();
+            // Never let a stuck Windows call hold up quitting: wait a moment
+            // for the worker, then leave it (the process is ending anyway, or
+            // the thread finishes on its own once the call returns).
+            let deadline = std::time::Instant::now() + STOP_LIMIT;
+            while !t.is_finished() && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if t.is_finished() {
+                let _ = t.join();
+            } else {
+                log::info!("the notification reader is still busy; not waiting for it");
+            }
         }
     }
 }
@@ -151,10 +172,13 @@ fn listener() -> Result<UserNotificationListener> {
         .GetAccessStatus()
         .map_err(|e| unavailable(format!("{e}")))?;
     if status != UserNotificationListenerAccessStatus::Allowed {
-        status = l
+        // Windows may show a prompt; give the person time to answer, but not
+        // forever.
+        let op = l
             .RequestAccessAsync()
-            .and_then(|op| op.get())
             .map_err(|e| unavailable(format!("{e}")))?;
+        status = crate::winrt::wait(&op, ACCESS_LIMIT)
+            .ok_or_else(|| unavailable("no answer to the access request".into()))?;
     }
     if status == UserNotificationListenerAccessStatus::Allowed {
         Ok(l)
@@ -167,7 +191,11 @@ fn listener() -> Result<UserNotificationListener> {
 
 /// The current toasts, by id (not yet read in full).
 fn snapshot(l: &UserNotificationListener) -> windows::core::Result<Vec<(u32, UserNotification)>> {
-    let list = l.GetNotificationsAsync(NotificationKinds::Toast)?.get()?;
+    let op = l.GetNotificationsAsync(NotificationKinds::Toast)?;
+    let Some(list) = crate::winrt::wait(&op, READ_LIMIT) else {
+        log::info!("reading the notification list took too long; trying again");
+        return Ok(Vec::new());
+    };
     Ok(list
         .into_iter()
         .filter_map(|n| n.Id().ok().map(|id| (id, n)))
@@ -183,21 +211,27 @@ fn logo(info: &windows::ApplicationModel::AppInfo) -> Option<Vec<u8>> {
         Width: 64.0,
         Height: 64.0,
     };
-    let stream = info
+    // Some apps' logos never finish loading: give up quickly rather than
+    // stall the mirror (and Perch's shutdown) on one icon.
+    let open = info
         .DisplayInfo()
         .ok()?
         .GetLogo(size)
         .ok()?
         .OpenReadAsync()
-        .ok()?
-        .get()
         .ok()?;
+    let Some(stream) = crate::winrt::wait(&open, LOGO_LIMIT) else {
+        log::info!("an app icon took too long to load; showing letters instead");
+        return None;
+    };
     let len = u32::try_from(stream.Size().ok()?).ok()?;
     if len == 0 || len > MAX_LOGO {
         return None;
     }
     let reader = DataReader::CreateDataReader(&stream).ok()?;
-    reader.LoadAsync(len).ok()?.get().ok()?;
+    let load: windows::Foundation::IAsyncOperation<u32> =
+        reader.LoadAsync(len).ok()?.cast().ok()?;
+    crate::winrt::wait(&load, LOGO_LIMIT)?;
     let mut buf = vec![0u8; len as usize];
     reader.ReadBytes(&mut buf).ok()?;
     Some(buf)

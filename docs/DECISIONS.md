@@ -440,6 +440,16 @@ body (`<b>`, `<a href>`, `&amp;`) are stripped to plain text, and Perch's own
 notifications are skipped. Closing the connection stops the reader. Tested
 on a private bus against a fake daemon (`tests/session_bus.rs`).
 
+**Every Windows call has a time limit (2026-11-15).** The mirror first
+waited on WinRT operations with `.get()`, which blocks until they finish.
+Once app icons were read for the banners (`AppInfo` logo streams), a logo
+that never finished loading left the reader thread stuck: no notification
+showed from then on, and quitting hung on joining that thread, so Windows
+reported Perch as not responding. Now `winrt::wait` polls each operation
+and cancels it past its limit (logo 2 s, list 5 s, access prompt 60 s), a
+slow icon falls back to letters, and stopping the mirror waits at most 2 s
+for the thread before leaving it.
+
 ## ADR-021: A stripe instead of hiding, over fullscreen and maximized apps
 
 The notch used to disappear while a fullscreen app was in front. The user
@@ -521,7 +531,9 @@ and the list header offers "Mark all read" for the account on screen. A
 click removes the rows at once (the server's next snapshot settles it) and
 starts a short connection of its own: sign in, `SELECT` the folder, check
 that UIDVALIDITY is still the one the UIDs came from, `UID STORE <uids>
-+FLAGS.SILENT (\Seen)` (mark all: `1:*`), `LOGOUT`. The watcher's
++FLAGS.SILENT (\Seen)` (mark all: `UID SEARCH UNSEEN`, then those UIDs in
+batches of 500; `1:*` made a big Gmail mailbox touch every message and time
+out), `LOGOUT`. The watcher's
 long-lived session stays `EXAMINE` (read-only), and it sees the flag change
 through IDLE and refreshes. A failure flashes "Could not mark as read" and
 reconnects the account so its list is right again.

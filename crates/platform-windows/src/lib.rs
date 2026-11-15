@@ -37,6 +37,8 @@ pub mod services;
 mod single_instance;
 #[cfg(windows)]
 pub mod window;
+#[cfg(windows)]
+pub mod winrt;
 
 #[cfg(windows)]
 pub use autostart::RegistryAutostart;

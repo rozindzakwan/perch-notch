@@ -784,14 +784,17 @@ pub fn update_password(
     Ok(())
 }
 
-/// The `UID STORE` set for a mark: these UIDs (`1,5,9`), or every message
-/// (`1:*`; read ones are unaffected). `None` for an empty list. Pure.
-pub fn store_set(uids: Option<&[u32]>) -> Option<String> {
-    match uids {
-        None => Some("1:*".into()),
-        Some([]) => None,
-        Some(u) => Some(u.iter().map(u32::to_string).collect::<Vec<_>>().join(",")),
-    }
+/// UIDs per `UID STORE` command when marking many messages.
+const STORE_CHUNK: usize = 500;
+
+/// The `UID STORE` set for a mark (`1,5,9`); `None` for an empty list. Pure.
+pub fn store_set(uids: &[u32]) -> Option<String> {
+    (!uids.is_empty()).then(|| {
+        uids.iter()
+            .map(u32::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    })
 }
 
 /// Mark messages read (`[mail] allow_mark_read`), on a worker thread, over
@@ -825,7 +828,9 @@ fn mark_read_now(
     uid_validity: u32,
     uids: Option<&[u32]>,
 ) -> Result<(), String> {
-    let set = store_set(uids).ok_or("nothing to mark")?;
+    if uids.is_some_and(<[u32]>::is_empty) {
+        return Err("nothing to mark".into());
+    }
     if let Some(p) = account.problem() {
         return Err(p);
     }
@@ -855,12 +860,35 @@ fn mark_read_now(
         let _ = conn.command("LOGOUT", SessErr::Fail, |_| {});
         return Err("the mailbox changed; the list will refresh".into());
     }
-    conn.command(
-        &format!("UID STORE {set} +FLAGS.SILENT (\\Seen)"),
-        SessErr::Fail,
-        |_| {},
-    )
-    .map_err(text)?;
+    // "Mark all" asks the server which messages are unread and marks just
+    // those: storing to every UID makes a big mailbox (Gmail) touch every message
+    // and can outlast the command timeout.
+    let targets: Vec<u32> = match uids {
+        Some(u) => u.to_vec(),
+        None => {
+            let mut found = Vec::new();
+            conn.command("UID SEARCH UNSEEN", SessErr::Fail, |r| {
+                if let Response::MailboxData(MailboxDatum::Search(v)) = r {
+                    found.extend(v);
+                }
+            })
+            .map_err(text)?;
+            found.sort_unstable();
+            found.dedup();
+            found
+        }
+    };
+    for chunk in targets.chunks(STORE_CHUNK) {
+        let Some(set) = store_set(chunk) else {
+            continue;
+        };
+        conn.command(
+            &format!("UID STORE {set} +FLAGS.SILENT (\\Seen)"),
+            SessErr::Fail,
+            |_| {},
+        )
+        .map_err(text)?;
+    }
     // LOGOUT, not CLOSE: CLOSE would expunge messages marked deleted.
     let _ = conn.command("LOGOUT", SessErr::Fail, |_| {});
     Ok(())
@@ -924,9 +952,8 @@ mod tests {
     use super::store_set;
 
     #[test]
-    fn store_sets_list_uids_or_everything() {
-        assert_eq!(store_set(Some(&[3, 9, 12])).as_deref(), Some("3,9,12"));
-        assert_eq!(store_set(None).as_deref(), Some("1:*"));
-        assert_eq!(store_set(Some(&[])), None);
+    fn store_sets_list_the_uids() {
+        assert_eq!(store_set(&[3, 9, 12]).as_deref(), Some("3,9,12"));
+        assert_eq!(store_set(&[]), None);
     }
 }
