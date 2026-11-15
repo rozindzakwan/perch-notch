@@ -77,6 +77,12 @@ pub fn settings_spec(cfg: &Config, monitors: &[Monitor], mail: &MailBoard) -> Fo
         disabled: false,
     });
     fields.push(Field::Toggle {
+        id: "keep_pill".into(),
+        label: "Lock: keep the pill there instead of the stripe".into(),
+        value: cfg.notch.keep_pill,
+        disabled: !cfg.notch.hide_on_fullscreen,
+    });
+    fields.push(Field::Toggle {
         id: "autostart".into(),
         label: "Start at login".into(),
         value: cfg.autostart,
@@ -217,6 +223,7 @@ pub fn apply_settings_event(cfg: &Config, monitors: &[Monitor], ev: &FormEvent) 
         },
         FormEvent::Toggled(id, v) => match id.as_str() {
             "hide_on_fullscreen" => next.notch.hide_on_fullscreen = *v,
+            "keep_pill" => next.notch.keep_pill = *v,
             "autostart" => next.autostart = *v,
             "notify_in_notch" => next.notifications.in_notch = *v,
             "notify_system" => next.notifications.system = *v,

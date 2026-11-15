@@ -248,3 +248,21 @@ fn mail_account_rows_show_status() {
     assert_eq!(rows[1].2, None, "still connecting: neither ok nor failed");
     assert_eq!(rows[1].3, Some("mail-remove:1"));
 }
+
+#[test]
+fn the_lock_is_a_setting_that_edits_keep_pill() {
+    let cfg = Config::default();
+    let spec = settings_spec(&cfg, &monitors(), &MailBoard::default());
+    assert!(spec
+        .fields
+        .iter()
+        .any(|f| matches!(f, Field::Toggle { id, value: false, .. } if id == "keep_pill")));
+    let SettingsOutcome::Changed(c) = apply_settings_event(
+        &cfg,
+        &monitors(),
+        &FormEvent::Toggled("keep_pill".into(), true),
+    ) else {
+        panic!("lock toggled")
+    };
+    assert!(c.notch.keep_pill);
+}

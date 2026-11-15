@@ -191,7 +191,7 @@ fn an_obscuring_app_shrinks_the_notch_to_a_stripe_and_restores_it() {
 }
 
 #[test]
-fn a_one_second_hover_unlocks_the_stripe_and_opens_the_panel() {
+fn hovering_the_stripe_for_one_second_opens_the_panel_then_it_is_a_stripe_again() {
     let mut n = notch();
     n.handle(NotchEvent::ObscuredChanged(true));
     assert!(n.is_locked());
@@ -199,7 +199,7 @@ fn a_one_second_hover_unlocks_the_stripe_and_opens_the_panel() {
     assert_eq!(
         n.next_deadline(),
         Some(Duration::from_secs(1)),
-        "wakes once, for the unlock"
+        "wakes once, for the reveal"
     );
     n.advance(Duration::from_millis(900));
     assert_eq!(
@@ -209,42 +209,40 @@ fn a_one_second_hover_unlocks_the_stripe_and_opens_the_panel() {
     );
     assert!(n.is_stripe());
     n.advance(Duration::from_millis(200));
-    assert!(!n.is_locked(), "1 s of hovering unlocks it");
     open_fully(&mut n);
-    assert_eq!(
-        n.state(),
-        NotchState::Expanded,
-        "and the pointer is on it: full panel"
-    );
-}
-
-#[test]
-fn once_unlocked_it_is_the_pill_and_hovering_opens_the_panel_at_once() {
-    let mut n = notch();
-    n.handle(NotchEvent::ObscuredChanged(true));
-    n.handle(NotchEvent::HotZoneEntered);
-    n.advance(Duration::from_millis(1_100));
-    open_fully(&mut n);
-    // Moving away: back to the pill, not the stripe, not the full panel.
+    assert_eq!(n.state(), NotchState::Expanded, "1 s of hovering opens it");
+    // Moving away: back to the stripe (only the lock keeps the pill).
     n.handle(NotchEvent::HotZoneLeft);
     for _ in 0..200 {
         n.advance(Duration::from_millis(8));
     }
     assert_eq!(n.state(), NotchState::Collapsed);
-    assert!(!n.is_stripe(), "unlocked: the pill");
-    // Hovering the pill opens the panel straight away.
-    n.handle(NotchEvent::PointerEntered);
-    assert_ne!(n.state(), NotchState::Collapsed, "no delay once unlocked");
-    open_fully(&mut n);
-    assert_eq!(n.state(), NotchState::Expanded);
-    // The next fullscreen / maximized window locks it again.
-    n.handle(NotchEvent::PointerLeft);
-    n.handle(NotchEvent::ObscuredChanged(false));
+    assert!(n.is_stripe());
+}
+
+#[test]
+fn the_lock_keeps_the_normal_pill_over_fullscreen_and_hover_opens_at_once() {
+    let mut n = notch();
+    n.set_pill_lock(true);
     n.handle(NotchEvent::ObscuredChanged(true));
+    assert!(!n.is_locked());
+    assert!(!n.is_stripe(), "locked to the pill: no stripe");
+    n.handle(NotchEvent::PointerEntered);
+    assert_ne!(
+        n.state(),
+        NotchState::Collapsed,
+        "no delay with the lock on"
+    );
+    open_fully(&mut n);
+    // Leaving shows the pill, not the full content.
+    n.handle(NotchEvent::PointerLeft);
     for _ in 0..200 {
         n.advance(Duration::from_millis(8));
     }
-    assert!(n.is_locked());
+    assert_eq!(n.state(), NotchState::Collapsed);
+    assert!(!n.is_stripe());
+    // Turning the lock off brings the stripe back.
+    n.set_pill_lock(false);
     assert!(n.is_stripe());
 }
 

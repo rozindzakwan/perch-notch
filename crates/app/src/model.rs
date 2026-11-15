@@ -155,7 +155,6 @@ pub struct Model {
     features: ActiveFeatures,
     tab: Option<Tab>,
     scroll: usize,
-    pinned: bool,
 
     media: MediaState,
     media_reported_at: Instant,
@@ -208,7 +207,6 @@ impl Model {
             features,
             tab: None,
             scroll: 0,
-            pinned: false,
             media: MediaState::new(),
             media_reported_at: now.instant,
             seek_preview: None,
@@ -398,7 +396,7 @@ impl Model {
 
     /// Pinned open.
     pub fn pinned(&self) -> bool {
-        self.pinned
+        self.config.notch.keep_pill
     }
 
     /// Visible tabs for the live feature set.
@@ -1200,10 +1198,8 @@ impl Model {
                 redraw
             }
             Action::OpenSettings => vec![Effect::OpenSettings],
-            Action::PinToggle => {
-                self.pinned = !self.pinned;
-                vec![Effect::PinToggle, Effect::Redraw]
-            }
+            // The lock: the shell flips `[notch] keep_pill`, saves and applies it.
+            Action::PinToggle => vec![Effect::PinToggle],
         }
     }
 
@@ -1508,7 +1504,7 @@ impl Model {
             tabs,
             tab: self.tab,
             body,
-            pinned: self.pinned,
+            pinned: self.config.notch.keep_pill,
             banner: if self.panel_expanded {
                 None
             } else {

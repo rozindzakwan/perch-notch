@@ -57,7 +57,7 @@ impl ksni::Tray for PerchTray {
             }
             .into(),
             StandardItem {
-                label: "Pin open".into(),
+                label: "Lock the pill over fullscreen apps".into(),
                 activate: Box::new(|t: &mut Self| t.send("pin")),
                 ..Default::default()
             }

@@ -551,6 +551,7 @@ impl Shell {
         }
         self.notch
             .set_reveal_delay(Duration::from_millis(u64::from(cfg.notch.reveal_delay_ms)));
+        self.notch.set_pill_lock(cfg.notch.keep_pill);
         self.sync_obscured();
         self.sync_autostart();
         self.monitor = None;
@@ -729,7 +730,12 @@ impl Shell {
                     self.after_notch_change(el);
                 }
                 Effect::PinToggle => {
-                    self.notch.handle(NotchEvent::Toggle);
+                    // The lock: keep the pill (no stripe) over fullscreen and
+                    // maximized apps. A setting, so it survives a restart.
+                    let mut cfg = self.config().clone();
+                    cfg.notch.keep_pill = !cfg.notch.keep_pill;
+                    self.save_config(&cfg);
+                    self.apply_config(cfg);
                     self.after_notch_change(el);
                 }
                 Effect::ReloadConfig => self.reload_config(),
@@ -1358,6 +1364,7 @@ impl ApplicationHandler<UserEvent> for Shell {
         self.notch.set_reveal_delay(Duration::from_millis(u64::from(
             self.config().notch.reveal_delay_ms,
         )));
+        self.notch.set_pill_lock(self.config().notch.keep_pill);
         self.sync_obscured();
         self.place();
         self.request_redraw();

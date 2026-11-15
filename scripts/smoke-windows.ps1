@@ -388,25 +388,35 @@ try {
         Start-Sleep -Milliseconds 500
         $r = Get-LiveRect $pillHandle
         Check 'fullscreen_stripes' ($st.stripe -eq $true -and $st.visible -eq $true -and $r.H -le 8) "stripe=$($st.stripe), $($r.W)x$($r.H)"
-        # ...that a 1 s hover unlocks: the full panel opens.
+        # ...that a 1 s hover opens, and that comes back when the pointer leaves.
         Move-MouseAbsolute ([int]($screen.Width/2)) 0
         for ($i = 0; $i -lt 5; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
         $st = Read-Status
         Check 'stripe_hover_waits' ($st.state -eq 'Collapsed') "state after 0.5 s: $($st.state)"
         for ($i = 0; $i -lt 13; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
         $st = Read-Status
-        Check 'stripe_hover_unlocks' ($st.state -eq 'Expanded') "state after 1.8 s: $($st.state)"
-        # Unlocked, it rests as the normal pill, and hovering opens it at once.
+        Check 'stripe_hover_opens' ($st.state -eq 'Expanded') "state after 1.8 s: $($st.state)"
         Move-MouseAbsolute $parkX $parkY
         for ($i = 0; $i -lt 12; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
         $st = Read-Status
-        Check 'unlocked_rests_as_pill' ($st.stripe -eq $false -and $st.state -eq 'Collapsed') "stripe=$($st.stripe), state $($st.state)"
+        Check 'stripe_returns' ($st.stripe -eq $true) "stripe=$($st.stripe), state $($st.state)"
+        # The lock (padlock / `perch pin`): the normal pill instead of the stripe.
+        Invoke-Perch @('pin')
+        for ($i = 0; $i -lt 8; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+        $st = Read-Status
+        Check 'lock_shows_the_pill' ($st.stripe -eq $false -and $st.state -eq 'Collapsed') "stripe=$($st.stripe), state $($st.state)"
         Move-MouseAbsolute ([int]($screen.Width/2)) 0
         for ($i = 0; $i -lt 6; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
         $st = Read-Status
-        Check 'unlocked_pill_opens_at_once' ($st.state -eq 'Expanded') "state 0.6 s after hovering the pill: $($st.state)"
+        Check 'locked_pill_opens_at_once' ($st.state -eq 'Expanded') "state 0.6 s after hovering the pill: $($st.state)"
         Move-MouseAbsolute $parkX $parkY
         for ($i = 0; $i -lt 12; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+        $st = Read-Status
+        Check 'locked_rests_as_pill' ($st.stripe -eq $false -and $st.state -eq 'Collapsed') "stripe=$($st.stripe), state $($st.state)"
+        Invoke-Perch @('pin')
+        for ($i = 0; $i -lt 8; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+        $st = Read-Status
+        Check 'unlock_brings_the_stripe_back' ($st.stripe -eq $true) "stripe=$($st.stripe)"
     } else {
         Write-Host "[INFO] fullscreen_stripes: skipped, Windows refused to give the test window the foreground (foreground lock)"
         $results['fullscreen_stripes'] = @{ ok = $true; detail = 'skipped: foreground lock' }

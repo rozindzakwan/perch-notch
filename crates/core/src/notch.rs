@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use crate::anim::{ease_out, Spring};
 
-/// How long the pointer must rest on the stripe to unlock it.
+/// How long the pointer must rest on the stripe to open the notch.
 pub const DEFAULT_REVEAL_DELAY: Duration = Duration::from_secs(1);
 /// How long the content takes to fade in once the panel is 40 % open.
 const CONTENT_FADE: Duration = Duration::from_millis(140);
@@ -102,9 +102,9 @@ pub struct Notch {
     obscured: bool,
     /// Time left before a hover on the stripe opens the notch.
     pending_reveal: Option<Duration>,
-    /// The pointer rested on the stripe long enough: until the next
-    /// fullscreen or maximized window, the notch is the normal pill again.
-    unlocked: bool,
+    /// The user's lock: keep the normal pill instead of the stripe even when
+    /// something is in front.
+    pill_lock: bool,
     reveal_delay: Duration,
     pinned: bool,
 }
@@ -130,7 +130,7 @@ impl Notch {
             in_pill: false,
             obscured: false,
             pending_reveal: None,
-            unlocked: false,
+            pill_lock: false,
             reveal_delay: DEFAULT_REVEAL_DELAY,
             pinned: false,
         }
@@ -175,10 +175,19 @@ impl Notch {
         self.is_locked() && self.state == NotchState::Collapsed
     }
 
-    /// Something is in front and the stripe has not been unlocked by a hover
-    /// (banners wait meanwhile).
+    /// Something is in front and the user has not locked the pill on, so the
+    /// notch rests as a stripe (banners wait meanwhile).
     pub fn is_locked(&self) -> bool {
-        self.obscured && !self.unlocked
+        self.obscured && !self.pill_lock
+    }
+
+    /// The user's lock: `true` keeps the normal pill over fullscreen and
+    /// maximized apps; `false` (default) shows the stripe there.
+    pub fn set_pill_lock(&mut self, on: bool) {
+        self.pill_lock = on;
+        if on {
+            self.pending_reveal = None;
+        }
     }
 
     /// Something sits in front of the notch (banners wait meanwhile).
@@ -295,9 +304,7 @@ impl Notch {
                 }
                 self.obscured = on;
                 self.pending_reveal = None;
-                // Each new fullscreen / maximized window locks it again.
-                self.unlocked = false;
-                if on && !self.pinned && !self.inside() {
+                if self.is_locked() && !self.pinned && !self.inside() {
                     // Something came to the front: close down to the stripe.
                     self.pending_collapse = None;
                     self.start_collapsing();
@@ -385,8 +392,6 @@ impl Notch {
             if dt >= left {
                 self.pending_reveal = None;
                 if self.inside() {
-                    // Unlocked: the pill again, and the pointer is on it.
-                    self.unlocked = true;
                     self.start_expanding();
                 }
             } else {

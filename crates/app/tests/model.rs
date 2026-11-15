@@ -1087,3 +1087,15 @@ fn other_apps_notifications_become_banners_when_mirroring_is_on() {
         assert!(m.view(now).banner.is_none());
     }
 }
+
+#[test]
+fn the_padlock_asks_the_shell_to_flip_the_lock_and_shows_its_state() {
+    let now = t0();
+    let mut cfg = config_all();
+    let mut m = Model::new(cfg.clone(), now);
+    assert_eq!(m.action(Action::PinToggle, now), vec![Effect::PinToggle]);
+    assert!(!m.view(now).pinned);
+    cfg.notch.keep_pill = true;
+    m.apply_config(cfg);
+    assert!(m.view(now).pinned, "the padlock shows the saved lock");
+}

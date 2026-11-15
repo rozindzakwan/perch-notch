@@ -42,6 +42,7 @@ pub enum Icon {
     Save,
     Type,
     Ocr,
+    Lock,
 }
 
 impl Icon {
@@ -78,6 +79,7 @@ impl Icon {
         Icon::Save,
         Icon::Type,
         Icon::Ocr,
+        Icon::Lock,
     ];
 
     /// The icon shown for a panel tab.
@@ -257,6 +259,12 @@ fn shape(g: &mut G, icon: Icon) {
         Icon::Pin => {
             g.circle(12.0, 8.0, 4.5);
             g.line(&[(12.0, 12.5), (12.0, 21.0)]);
+        }
+        Icon::Lock => {
+            // Shackle, then the body.
+            g.quad((7.5, 11.0), (7.5, 3.5), (12.0, 3.5));
+            g.quad((12.0, 3.5), (16.5, 3.5), (16.5, 11.0));
+            g.rrect(5.0, 11.0, 14.0, 10.0, 2.5);
         }
         Icon::Play => g.solid(&[(8.0, 5.0), (19.0, 12.0), (8.0, 19.0)]),
         Icon::Pause => {

@@ -396,7 +396,7 @@ fn draw_panel(ctx: &mut Ctx<'_>, view: &PanelView, panel: (f32, f32, f32, f32), 
     let pin_x = gear_x - btn - 4.0 * s;
     let by = y + pad + (bar - btn) / 2.0;
     for (bx, icon, action, active) in [
-        (pin_x, Icon::Pin, Action::PinToggle, view.pinned),
+        (pin_x, Icon::Lock, Action::PinToggle, view.pinned),
         (gear_x, Icon::Gear, Action::OpenSettings, false),
     ] {
         let rect = (bx, by, btn, btn);

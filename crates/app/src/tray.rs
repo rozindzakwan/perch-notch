@@ -20,7 +20,7 @@ impl Tray {
     pub fn start(sink: EventSink, autostart: bool) -> Result<Self> {
         let menu = Menu::new();
         let toggle = MenuItem::with_id("toggle-notch", "Show / hide notch", true, None);
-        let pin = MenuItem::with_id("pin", "Pin open", true, None);
+        let pin = MenuItem::with_id("pin", "Lock the pill over fullscreen apps", true, None);
         let settings = MenuItem::with_id("settings", "Settings\u{2026}", true, None);
         let auto =
             CheckMenuItem::with_id("autostart-toggle", "Start at login", true, autostart, None);
