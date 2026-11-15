@@ -314,7 +314,7 @@ pub fn preset_for_address(address: &str) -> Option<&'static MailPreset> {
     let domain = address.rsplit_once('@')?.1.trim().to_ascii_lowercase();
     let id = match domain.as_str() {
         "gmail.com" | "googlemail.com" => "gmail",
-        "yahoo.com" | "ymail.com" => "yahoo",
+        "yahoo.com" | "ymail.com" | "rocketmail.com" => "yahoo",
         "icloud.com" | "me.com" | "mac.com" => "icloud",
         "fastmail.com" | "fastmail.fm" => "fastmail",
         "zoho.com" | "zohomail.com" => "zoho",
@@ -573,6 +573,32 @@ mod tests {
         assert_eq!(b.total_unread(), 1);
         // A message marked unread again (lower UID) is not "new".
         assert!(b.apply(snap(7, &[2, 5])).is_empty());
+    }
+
+    #[test]
+    fn a_gmail_address_on_another_providers_server_is_a_problem() {
+        use crate::config::MailAccount;
+        let acct = |user: &str, host: &str| MailAccount {
+            name: "x".into(),
+            username: user.into(),
+            host: host.into(),
+            ..MailAccount::default()
+        };
+        let p = acct("me@gmail.com", "mail.spacemail.com").problem();
+        assert!(
+            p.as_deref().is_some_and(|m| m.contains("imap.gmail.com")),
+            "{p:?}"
+        );
+        assert_eq!(acct("me@gmail.com", "imap.gmail.com").problem(), None);
+        assert_eq!(
+            acct("me@company.example", "mail.spacemail.com").problem(),
+            None
+        );
+        assert_eq!(
+            acct("me@gmail.com", "imap.proxy.example").problem(),
+            None,
+            "a custom server is the user's choice"
+        );
     }
 
     #[test]

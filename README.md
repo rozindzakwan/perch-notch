@@ -291,7 +291,10 @@ again, or with `perch mail-password <name>` followed by `perch mail-retry`.
 
 - **Gmail / Google Workspace:** use an *app password* (Google Account →
   Security → 2-Step Verification → App passwords). Your normal password won't
-  work over IMAP.
+  work over IMAP. A `@gmail.com` address always goes to `imap.gmail.com`,
+  even if the dialog was left on another provider (the same goes for Yahoo,
+  iCloud, Fastmail and Zoho addresses); a Gmail address already saved with
+  another provider's server shows "wrong server" instead of a sign-in error.
 - **Spacemail (Namecheap):** your mailbox password; server
   `mail.spacemail.com`, port 993.
 - **Microsoft 365 / Outlook.com:** not supported yet. Microsoft only allows

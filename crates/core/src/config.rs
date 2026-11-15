@@ -394,6 +394,20 @@ impl MailAccount {
         if self.security == crate::mail::Security::Plain && !crate::mail::is_loopback(&self.host) {
             return Some("unencrypted connections are only allowed to localhost".into());
         }
+        // A Gmail (Yahoo, iCloud...) address on another provider's server can
+        // only fail to sign in; say what is wrong instead.
+        if let Some(own) = crate::mail::preset_for_address(&self.username) {
+            let host = self.host.trim().to_ascii_lowercase();
+            let other = crate::mail::PRESETS
+                .iter()
+                .any(|p| !p.host.is_empty() && p.host == host && p.id != own.id);
+            if other {
+                return Some(format!(
+                    "wrong server: this address needs {} ({}); remove it and add it again",
+                    own.host, own.label
+                ));
+            }
+        }
         None
     }
 }

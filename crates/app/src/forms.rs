@@ -480,13 +480,24 @@ pub fn parse_mail_form(
     if f.password.is_empty() {
         return Err("enter the password".into());
     }
-    let host = f.host.trim().to_ascii_lowercase();
+    let mut host = f.host.trim().to_ascii_lowercase();
+    let mut port_text = f.port.trim().to_string();
+    // A @gmail.com address only works on Gmail's server: if the dialog still
+    // has another provider's server filled in (Spacemail is listed first),
+    // use the address's own provider instead of failing the sign-in.
+    if let Some(p) = perch_core::mail::preset_for_address(email) {
+        let other_preset = PRESETS
+            .iter()
+            .any(|q| !q.host.is_empty() && q.host == host && q.id != p.id);
+        if host.is_empty() || other_preset {
+            host = p.host.to_string();
+            port_text = p.port.to_string();
+        }
+    }
     if host.is_empty() || host.contains(char::is_whitespace) {
         return Err("enter the IMAP server, e.g. imap.example.com".into());
     }
-    let port: u16 = f
-        .port
-        .trim()
+    let port: u16 = port_text
         .parse()
         .ok()
         .filter(|p| *p > 0)
@@ -547,6 +558,49 @@ mod mail_form_tests {
             "",
             "a preset host is not kept for Other"
         );
+    }
+
+    #[test]
+    fn a_gmail_address_left_on_the_default_spacemail_server_goes_to_gmail() {
+        // The dialog opens on Spacemail; typing a Gmail address and its app
+        // password without switching the provider used to sign in to
+        // Spacemail with Google's password.
+        let f = MailForm {
+            email: "someone@gmail.com".into(),
+            password: "abcd efgh ijkl mnop".into(),
+            ..MailForm::default()
+        };
+        let (a, pw) = parse_mail_form(&f, &[]).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!((a.host.as_str(), a.port), ("imap.gmail.com", 993));
+        assert_eq!(pw, "abcdefghijklmnop", "the app password's spaces go");
+        // A company address stays on the server it was given.
+        let work = MailForm {
+            email: "me@company.example".into(),
+            password: "pw".into(),
+            ..MailForm::default()
+        };
+        let (a, _) = parse_mail_form(&work, &[]).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(a.host, "mail.spacemail.com");
+        // A custom server typed for a Gmail address (a proxy, say) is kept.
+        let custom = MailForm {
+            host: "imap.proxy.example".into(),
+            ..f.clone()
+        };
+        let (a, _) = parse_mail_form(&custom, &[]).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(a.host, "imap.proxy.example");
+        // Yahoo and iCloud addresses too.
+        for (email, host) in [
+            ("x@yahoo.com", "imap.mail.yahoo.com"),
+            ("x@icloud.com", "imap.mail.me.com"),
+        ] {
+            let g = MailForm {
+                email: email.into(),
+                password: "pw".into(),
+                ..MailForm::default()
+            };
+            let (a, _) = parse_mail_form(&g, &[]).unwrap_or_else(|e| panic!("{e}"));
+            assert_eq!(a.host, host);
+        }
     }
 
     #[test]
