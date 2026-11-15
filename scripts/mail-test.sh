@@ -126,6 +126,8 @@ for _ in $(seq 50); do xdpyinfo >/dev/null 2>&1 && break; sleep 0.1; done
 openbox >/dev/null 2>&1 &
 PIDS+=($!)
 
+# cargo (the real-server mark test) still needs the real toolchain.
+export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 export HOME=$M/home XDG_CONFIG_HOME=$M/config XDG_DATA_HOME=$M/data XDG_CACHE_HOME=$M/cache XDG_RUNTIME_DIR=$M/xdg
 mkdir -p "$HOME" "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
 export PERCH_STATUS_FILE=$M/status.json PERCH_LOG=stderr

@@ -7,6 +7,8 @@ cd "$(dirname "$0")/.."
 export XDG_RUNTIME_DIR
 XDG_RUNTIME_DIR=$(mktemp -d)
 chmod 700 "$XDG_RUNTIME_DIR"
+# cargo still needs the real toolchain after HOME changes below.
+export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}" CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 export HOME
 HOME=$(mktemp -d)
 

@@ -16,6 +16,12 @@ OUT=${PERCH_CI_OUT:-$ROOT/artifacts/linux}
 mkdir -p "$OUT"
 export CARGO_TERM_COLOR=${CARGO_TERM_COLOR:-never}
 export RUST_BACKTRACE=1
+# Some stages run cargo with a throwaway HOME (a private keyring, a private
+# PulseAudio). rustup finds its toolchains through HOME unless these are set,
+# so pin them to the real locations first (GitHub's runner sets neither; the
+# CI image sets both). They also survive `sudo -E` into the mail stage.
+export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
 
 say() { printf '\n==> %s\n' "$*"; }
 

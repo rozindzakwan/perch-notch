@@ -348,9 +348,17 @@ show up in its log), not on an idle desktop. To re-score a run:
   then `scripts/linux-ci.sh all`. Uploads the `.deb`, tarball and evidence.
 - **audit**: `cargo audit`.
 
-The repository has no remote yet, so the workflow hasn't run on GitHub. Its
-Linux half is exactly the container run above. The Windows MSVC leg
-(dictation) is the only part not exercised anywhere yet.
+On GitHub (2026-11-15) the Windows legs (GNU and MSVC, including the
+dictation build) and audit pass. The Linux leg failed on every run until the
+same day: the PulseAudio, keyring and mail stages run `cargo` with a
+throwaway `HOME`, and on the runner rustup lives under `~/.rustup` with no
+`RUSTUP_HOME`, so `cargo` found no toolchain ("rustup could not choose a
+version of cargo to run"). The CI image sets `RUSTUP_HOME=/opt/rustup`, which
+hid it locally. `linux-ci.sh` (and the two test scripts) now pin
+`RUSTUP_HOME`/`CARGO_HOME` before any `HOME` change. Reproduced in the
+container with GitHub's layout (normal user with sudo, Rust under `~/.rustup`,
+neither variable set): the old scripts fail exactly like the runner, the fixed
+ones pass.
 
 ## Real Linux Mint
 
