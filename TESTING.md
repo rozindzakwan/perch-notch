@@ -58,7 +58,7 @@ Real windows, real synthetic input (`SendInput`), real SMTC. The scripts check
 that the mouse is idle before they start and never screenshot more than the
 notch area.
 
-### `scripts/smoke-windows.ps1`: 32/32 passed
+### `scripts/smoke-windows.ps1`: 33/33 passed
 
 It waits until the keyboard and mouse have been idle for 60 s (`scripts/lib-idle.ps1`),
 so it never fights a person at the machine, and captures only the pill window.
