@@ -266,3 +266,14 @@ fn the_lock_is_a_setting_that_edits_keep_pill() {
     };
     assert!(c.notch.keep_pill);
 }
+
+#[test]
+fn gmail_app_passwords_work_with_the_spaces_google_shows() {
+    use perch_app::forms::{parse_mail_form, MailForm};
+    let mut f = MailForm::default().with_preset(1);
+    assert_eq!(f.host, "imap.gmail.com", "preset 1 is Gmail");
+    f.email = "someone@gmail.com".into();
+    f.password = "abcd efgh ijkl mnop".into();
+    let (_, password) = parse_mail_form(&f, &[]).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(password, "abcdefghijklmnop");
+}

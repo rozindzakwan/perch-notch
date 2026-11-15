@@ -191,6 +191,8 @@ pub fn apply_settings_event(cfg: &Config, monitors: &[Monitor], ev: &FormEvent) 
     let mut next = cfg.clone();
     match ev {
         FormEvent::Closed => return SettingsOutcome::Close,
+        // No text boxes in the settings window.
+        FormEvent::PasteRequested => return SettingsOutcome::None,
         FormEvent::Button(id) if id == "close" => return SettingsOutcome::Close,
         FormEvent::Button(id) if id == "open-config" => return SettingsOutcome::OpenConfig,
         FormEvent::Button(id) if id == "mail-add" => return SettingsOutcome::AddMailAccount,
@@ -505,7 +507,14 @@ pub fn parse_mail_form(
     if let Some(p) = account.problem() {
         return Err(p);
     }
-    Ok((account, f.password.clone()))
+    // Google shows app passwords in groups ("abcd efgh ijkl mnop"); they
+    // never contain spaces, so a copied one is cleaned up.
+    let password = if account.host.eq_ignore_ascii_case("imap.gmail.com") {
+        f.password.split_whitespace().collect()
+    } else {
+        f.password.clone()
+    };
+    Ok((account, password))
 }
 
 #[cfg(test)]

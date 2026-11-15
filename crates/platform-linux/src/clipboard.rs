@@ -98,6 +98,12 @@ impl ClipboardAccess for X11Clipboard {
         Ok(())
     }
 
+    fn paste_text(&mut self) -> Result<Option<String>> {
+        // An explicit paste: read the text even when a password manager marked
+        // it as secret (that is usually why it was copied). Never recorded.
+        Ok(self.cb.get_text().ok().filter(|t| !t.is_empty()))
+    }
+
     fn write_files(&mut self, paths: &[PathBuf]) -> Result<()> {
         self.cb
             .set()

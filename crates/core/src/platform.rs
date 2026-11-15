@@ -224,6 +224,16 @@ pub trait ClipboardAccess {
     /// Put a list of files on the clipboard (so they can be pasted in a file
     /// manager).
     fn write_files(&mut self, paths: &[std::path::PathBuf]) -> Result<()>;
+    /// The clipboard's text for an explicit paste into one of Perch's input
+    /// boxes. Unlike [`ClipboardAccess::read`] this is what the user asked
+    /// for (e.g. an app password copied from a password manager), so
+    /// backends may return text marked as secret; it is never recorded.
+    fn paste_text(&mut self) -> Result<Option<String>> {
+        Ok(self
+            .read()?
+            .and_then(|(c, _)| c.as_text().map(str::to_string))
+            .filter(|t| !t.is_empty()))
+    }
 }
 
 /// How long the user has been idle. Queried once per reminder deadline (never

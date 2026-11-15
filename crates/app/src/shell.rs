@@ -907,6 +907,7 @@ impl Shell {
                         Err(msg) => self.open_mail_dialog(el, &form, Some(&msg)),
                     }
                 }
+                perch_ui::form::FormEvent::PasteRequested => self.paste_into_dialog(),
                 perch_ui::form::FormEvent::Button(_) | perch_ui::form::FormEvent::Closed => {
                     self.dialog = None;
                     crate::sys::trim_heap();
@@ -914,6 +915,22 @@ impl Shell {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// Ctrl+V / Shift+Insert in a dialog: paste the clipboard's text into the
+    /// focused field. Read only on this explicit request, never recorded.
+    fn paste_into_dialog(&mut self) {
+        let text = match self.services.ensure_clipboard().map(|c| c.paste_text()) {
+            Some(Ok(Some(t))) => t,
+            Some(Err(e)) => {
+                log::warn!("paste: {e}");
+                return;
+            }
+            _ => return,
+        };
+        if let Some(w) = &mut self.dialog {
+            w.paste(&text);
         }
     }
 
@@ -1278,6 +1295,7 @@ impl Shell {
                         }
                     }
                 }
+                perch_ui::form::FormEvent::PasteRequested => self.paste_into_dialog(),
                 perch_ui::form::FormEvent::Button(_) | perch_ui::form::FormEvent::Closed => {
                     self.dialog = None;
                     crate::sys::trim_heap();

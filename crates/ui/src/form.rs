@@ -125,6 +125,9 @@ pub enum FormEvent {
     Button(String),
     /// The window was closed (or Escape pressed).
     Closed,
+    /// Ctrl+V / Shift+Insert: the owner reads the clipboard and calls
+    /// [`FormWindow::paste`] (the form itself has no clipboard access).
+    PasteRequested,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -318,6 +321,13 @@ impl FormState {
                 }
             }
         }
+    }
+
+    /// Paste into the focused field: one line (line breaks become spaces),
+    /// trimmed, within the same length limit as typing.
+    pub fn paste(&mut self, s: &str) {
+        let line = s.split_whitespace().collect::<Vec<_>>().join(" ");
+        self.type_text(&line);
     }
 
     /// Backspace in the focused field.
@@ -942,6 +952,8 @@ pub struct FormWindow {
     text: TextRenderer,
     palette: Palette,
     cursor: (f64, f64),
+    /// Keyboard modifiers, for Ctrl+V / Shift+Insert.
+    mods: winit::keyboard::ModifiersState,
     /// Reused between paints; reallocated only when the window size changes.
     pixmap: Option<Pixmap>,
 }
@@ -982,6 +994,7 @@ impl FormWindow {
             text: TextRenderer::new()?,
             palette,
             cursor: (0.0, 0.0),
+            mods: winit::keyboard::ModifiersState::empty(),
             pixmap: None,
         })
     }
@@ -994,6 +1007,12 @@ impl FormWindow {
     /// Form state (for reading text fields).
     pub fn state(&self) -> &FormState {
         &self.state
+    }
+
+    /// Paste text into the focused field (after a [`FormEvent::PasteRequested`]).
+    pub fn paste(&mut self, text: &str) {
+        self.state.paste(text);
+        self.window.request_redraw();
     }
 
     /// Replace the spec and repaint.
@@ -1050,9 +1069,19 @@ impl FormWindow {
                 self.state.scroll(dy, view_h);
                 Vec::new()
             }
+            WindowEvent::ModifiersChanged(m) => {
+                self.mods = m.state();
+                return Vec::new();
+            }
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 match &event.logical_key {
                     Key::Named(NamedKey::Escape) => return vec![FormEvent::Closed],
+                    Key::Character(c) if self.mods.control_key() && c.eq_ignore_ascii_case("v") => {
+                        return vec![FormEvent::PasteRequested];
+                    }
+                    Key::Named(NamedKey::Insert) if self.mods.shift_key() => {
+                        return vec![FormEvent::PasteRequested];
+                    }
                     Key::Named(NamedKey::Enter) => self.state.enter(),
                     Key::Named(NamedKey::Backspace) => {
                         self.state.backspace();
@@ -1261,5 +1290,63 @@ mod glass_tests {
             vec![FormEvent::Button("rm".into())]
         );
         assert_eq!(st.group_rects().len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::*;
+
+    fn dialog() -> FormState {
+        FormState::new(FormSpec {
+            title: "t".into(),
+            fields: vec![
+                Field::Text {
+                    id: "email".into(),
+                    label: "Email".into(),
+                    value: "ann@".into(),
+                    placeholder: String::new(),
+                    secret: false,
+                },
+                Field::Text {
+                    id: "password".into(),
+                    label: "Password".into(),
+                    value: String::new(),
+                    placeholder: String::new(),
+                    secret: true,
+                },
+            ],
+            size: (400, 300),
+        })
+    }
+
+    #[test]
+    fn paste_goes_into_the_focused_field_on_one_line() {
+        let mut st = dialog();
+        st.paste("example.com\n");
+        assert_eq!(
+            st.text("email"),
+            Some("ann@example.com"),
+            "focused first field, newline dropped"
+        );
+        st.tab();
+        st.paste("  abcd efgh\r\nijkl mnop  ");
+        assert_eq!(
+            st.text("password"),
+            Some("abcd efgh ijkl mnop"),
+            "trimmed, lines joined"
+        );
+        assert_eq!(
+            st.text("email"),
+            Some("ann@example.com"),
+            "other field untouched"
+        );
+    }
+
+    #[test]
+    fn paste_respects_the_length_limit() {
+        let mut st = dialog();
+        st.paste(&"x".repeat(2_000));
+        assert_eq!(st.text("email").map(|s| s.chars().count()), Some(500));
     }
 }

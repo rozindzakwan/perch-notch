@@ -236,7 +236,7 @@ pub const PRESETS: &[MailPreset] = &[
         label: "Gmail / Google Workspace",
         host: "imap.gmail.com",
         port: 993,
-        hint: "an app password (Google Account > Security > App passwords)",
+        hint: "an app password: Google Account > Security > 2-Step Verification > App passwords",
     },
     MailPreset {
         id: "yahoo",
