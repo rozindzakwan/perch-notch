@@ -164,6 +164,12 @@ pub struct Model {
     /// The lyric line the collapsed pill shows (kept by `tick`, which runs at
     /// each line change while lyrics are on and a track plays).
     pill_lyric: Option<String>,
+    /// The clock the idle pill shows ("14:05  Sun 15 Nov"), kept by `tick`.
+    pill_clock: String,
+    /// Local offset from UTC in seconds (the shell keeps it current).
+    utc_offset: i32,
+    /// Place name for the Today tab, from the location feature.
+    location: Option<String>,
     cover: Option<(Arc<Vec<u8>>, u32)>,
     accent: Option<([u8; 3], [u8; 3])>,
     lyrics: Option<(String, Lyrics)>,
@@ -211,6 +217,9 @@ impl Model {
             media_reported_at: now.instant,
             seek_preview: None,
             pill_lyric: None,
+            pill_clock: String::new(),
+            utc_offset: 0,
+            location: None,
             cover: None,
             accent: None,
             lyrics: None,
@@ -403,6 +412,8 @@ impl Model {
     pub fn tabs(&self) -> Vec<Tab> {
         let f = &self.features;
         let mut tabs = Vec::new();
+        // Time, date and place: always first.
+        tabs.push(Tab::Today);
         if f.is_active(Feature::Media) {
             tabs.push(Tab::Media);
         }
@@ -580,6 +591,14 @@ impl Model {
                 fx.push(Effect::Redraw);
             }
         }
+        let clock = {
+            let lt = perch_core::clock::LocalTime::at(now.unix as i64, self.utc_offset);
+            format!("{}  {}", lt.time(), lt.date_short())
+        };
+        if clock != self.pill_clock {
+            self.pill_clock = clock;
+            fx.push(Effect::Redraw);
+        }
         let lyric = self.current_lyric(now);
         if lyric != self.pill_lyric {
             self.pill_lyric = lyric;
@@ -695,6 +714,10 @@ impl Model {
     /// `None` means it can sleep until the next external event.
     pub fn next_deadline(&self, now: Now, expanded: bool) -> Option<Duration> {
         let mut ds: Vec<Option<Duration>> = Vec::new();
+        // The clock in the pill and on the Today tab: the next whole minute.
+        ds.push(Some(Duration::from_secs(
+            perch_core::clock::until_next_minute(now.unix as i64),
+        )));
         ds.push(self.banners.next_deadline(now.instant));
         if let Some((_, at)) = &self.message {
             ds.push(Some(
@@ -754,6 +777,20 @@ impl Model {
         let line = lyrics.line_at(self.position_now(now)?)?;
         let text = line.text.trim();
         (!text.is_empty()).then(|| text.to_string())
+    }
+
+    /// The local offset from UTC (seconds), for the clock and dates.
+    pub fn set_utc_offset(&mut self, offset: i32) {
+        self.utc_offset = offset;
+    }
+
+    /// The place name the Today tab shows (from the location feature).
+    pub fn set_location(&mut self, place: Option<String>) -> Vec<Effect> {
+        if self.location == place {
+            return Vec::new();
+        }
+        self.location = place;
+        vec![Effect::Redraw]
     }
 
     /// The collapsed pill is showing a lyric line (it then keeps a steady,
@@ -1242,7 +1279,8 @@ impl Model {
                         let text = self.pill_lyric.clone().unwrap_or(label);
                         (thumb, glyph, text)
                     }
-                    _ => (None, None, String::new()),
+                    // Nothing playing: the time and date.
+                    _ => (None, Some(Glyph::Clock), self.pill_clock.clone()),
                 }
             };
         if text.is_empty() && badges.is_empty() {
@@ -1263,6 +1301,7 @@ impl Model {
         let rows = |n: usize, h: f32| (n.max(1) as f32 * h) as u32;
         let body: u32 = match self.tab {
             None => 60,
+            Some(Tab::Today) => 124,
             Some(Tab::Media) => 168,
             Some(Tab::Tasks) => 80 + rows(self.todos.len() + 1, ROW1),
             Some(Tab::Clipboard) => 28 + rows(self.clipboard.len(), ROW2),
@@ -1295,6 +1334,14 @@ impl Model {
         let body =
             match self.tab {
                 None => Body::Empty("Nothing enabled. Open settings to turn features on.".into()),
+                Some(Tab::Today) => {
+                    let lt = perch_core::clock::LocalTime::at(now.unix as i64, self.utc_offset);
+                    Body::Today(perch_core::view::TodayView {
+                        time: lt.time(),
+                        date: lt.date_long(),
+                        location: self.location.clone(),
+                    })
+                }
                 Some(Tab::Media) => Body::Media(self.media_view(now)),
                 Some(Tab::Tasks) => Body::Tasks(self.tasks_view(now)),
                 Some(Tab::Clipboard) => Body::List {
@@ -1675,6 +1722,7 @@ fn lyrics_request(token: &TrackToken, track: &Track) -> LyricsRequest {
 
 fn parse_tab(s: &str) -> Option<Tab> {
     Some(match s.trim().to_ascii_lowercase().as_str() {
+        "today" | "clock" | "time-date" => Tab::Today,
         "music" | "media" => Tab::Media,
         "tasks" | "todo" => Tab::Tasks,
         "clips" | "clipboard" => Tab::Clipboard,

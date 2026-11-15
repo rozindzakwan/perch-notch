@@ -57,6 +57,15 @@ fn mail(sender: &str, subject: &str, age: &str) -> Row {
 fn panels() -> Vec<(&'static str, Tab, Body)> {
     vec![
         (
+            "today",
+            Tab::Today,
+            Body::Today(perch_core::view::TodayView {
+                time: "14:05".into(),
+                date: "Sunday, 15 November".into(),
+                location: Some("Bandung, West Java".into()),
+            }),
+        ),
+        (
             "music",
             Tab::Media,
             Body::Media(MediaView {
@@ -220,6 +229,7 @@ fn main() {
         }
     };
     let tabs = vec![
+        Tab::Today,
         Tab::Media,
         Tab::Tasks,
         Tab::Mail,

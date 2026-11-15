@@ -96,6 +96,7 @@ fn fake_media_backend_drives_the_collapsed_pill_and_the_media_tab() {
         m.collapsed()
     );
 
+    m.action(Action::SelectTab(Tab::Media), now); // Today is the default tab
     let view = m.view(now.plus(Duration::from_secs(50)));
     let Body::Media(mv) = view.body else {
         panic!("media tab expected first");
@@ -126,6 +127,7 @@ fn transport_actions_reach_the_backend_and_pause_freezes_the_seek_bar() {
         &PlatformEvent::Media(MediaEvent::PlaybackChanged(false)),
         later,
     );
+    m.action(Action::SelectTab(Tab::Media), now); // Today is the default tab
     let Body::Media(mv) = m.view(later.plus(Duration::from_secs(30))).body else {
         panic!("media tab");
     };
@@ -218,6 +220,7 @@ fn lyrics_follow_the_playhead_and_schedule_the_next_line() {
     let fx = m.lyrics_loaded(&key, Some("[00:00.50]first\n[00:03.00]second\n"));
     assert_eq!(fx, vec![Effect::Redraw]);
     let at = now.plus(Duration::from_secs(1));
+    m.action(Action::SelectTab(Tab::Media), now); // Today is the default tab
     let Body::Media(mv) = m.view(at).body else {
         panic!()
     };
@@ -234,16 +237,21 @@ fn lyrics_follow_the_playhead_and_schedule_the_next_line() {
 }
 
 #[test]
-fn an_idle_model_has_no_deadline_so_the_loop_can_sleep() {
+fn an_idle_model_wakes_only_for_the_clock_minute() {
     let mut cfg = Config::default();
     cfg.features.todo = true;
     let now = t0();
     let m = Model::new(cfg, now);
-    assert_eq!(m.next_deadline(now, false), None);
+    let next = Duration::from_secs(perch_core::clock::until_next_minute(now.unix as i64));
+    assert_eq!(
+        m.next_deadline(now, false),
+        Some(next),
+        "only the clock in the pill"
+    );
     assert_eq!(
         m.next_deadline(now, true),
-        None,
-        "nothing playing: no seek-bar ticks"
+        Some(next),
+        "nothing playing: no seek-bar ticks, just the minute"
     );
 }
 
@@ -1098,4 +1106,40 @@ fn the_padlock_asks_the_shell_to_flip_the_lock_and_shows_its_state() {
     cfg.notch.keep_pill = true;
     m.apply_config(cfg);
     assert!(m.view(now).pinned, "the padlock shows the saved lock");
+}
+
+#[test]
+fn today_is_the_first_tab_and_the_idle_pill_shows_the_time() {
+    let now = t0();
+    let mut m = Model::new(config_all(), now);
+    m.set_utc_offset(7 * 3_600);
+    assert_eq!(m.tabs().first(), Some(&Tab::Today));
+    m.tick(now);
+    let lt = perch_core::clock::LocalTime::at(now.unix as i64, 7 * 3_600);
+    match m.collapsed() {
+        CollapsedView::Pill { glyph, text, .. } => {
+            assert_eq!(glyph, Some(Glyph::Clock));
+            assert_eq!(text, format!("{}  {}", lt.time(), lt.date_short()));
+        }
+        other => panic!("the time when nothing plays: {other:?}"),
+    }
+    m.set_location(Some("Bandung, West Java".into()));
+    m.action(Action::SelectTab(Tab::Today), now);
+    match m.view(now).body {
+        Body::Today(t) => {
+            assert_eq!(t.time, lt.time());
+            assert_eq!(t.date, lt.date_long());
+            assert_eq!(t.location.as_deref(), Some("Bandung, West Java"));
+        }
+        other => panic!("{other:?}"),
+    }
+    // Something playing takes the pill back.
+    m.handle_event(
+        &PlatformEvent::Media(MediaEvent::TrackChanged(track("A", 200, true))),
+        now,
+    );
+    match m.collapsed() {
+        CollapsedView::Pill { text, .. } => assert!(text.contains('A'), "{text}"),
+        other => panic!("{other:?}"),
+    }
 }

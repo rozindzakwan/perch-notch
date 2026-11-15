@@ -447,6 +447,7 @@ fn draw_panel(ctx: &mut Ctx<'_>, view: &PanelView, panel: (f32, f32, f32, f32), 
         (lh - HEADER * s - pad).max(0.0),
     );
     match &view.body {
+        Body::Today(t) => today(ctx, t, body),
         Body::Media(m) => music(ctx, m, body),
         Body::Tasks(t) => tasks(ctx, t, body),
         Body::List {
@@ -483,6 +484,35 @@ fn media_accent(ctx: &Ctx<'_>, m: &MediaView) -> crate::theme::Gradient {
         },
         None => ctx.pal.accent,
     }
+}
+
+/// Today: a large clock, the date and where you are.
+fn today(ctx: &mut Ctx<'_>, t: &perch_core::view::TodayView, (x, y, w, _h): (f32, f32, f32, f32)) {
+    let s = ctx.s;
+    let fg = ctx.pal.fg;
+    let muted = ctx.fade(fg, crate::tokens::SECONDARY_ALPHA);
+    let big = (46.0, Weight::Bold);
+    ctx.text(&t.time, x, y + 4.0 * s, 56.0 * s, big, fg, w);
+    ctx.text(&t.date, x, y + 62.0 * s, 22.0 * s, text::TITLE, fg, w);
+    let ly = y + 92.0 * s;
+    let isz = 16.0 * s;
+    ctx.icon(Icon::Pin, x, ly + 2.0 * s, isz, muted);
+    let (place, color) = match &t.location {
+        Some(p) => (p.as_str(), muted),
+        None => (
+            "Turn on Location in settings to show where you are",
+            ctx.fade(fg, 0.40),
+        ),
+    };
+    ctx.text(
+        place,
+        x + isz + 6.0 * s,
+        ly,
+        20.0 * s,
+        text::SECONDARY,
+        color,
+        w - isz - 6.0 * s,
+    );
 }
 
 /// Music: cover, title/artist, lyrics, gradient seek bar, transport.

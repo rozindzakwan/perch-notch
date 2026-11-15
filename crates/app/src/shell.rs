@@ -97,6 +97,9 @@ pub struct Shell {
     fullscreen: bool,
     /// Monitor (id) whose foreground window is maximized, if any.
     maximized_on: Option<u32>,
+    /// When the local UTC offset was last read (it can change with daylight
+    /// saving; read at most once a minute).
+    offset_read: Option<Instant>,
     last_anim: Instant,
     settings: Option<FormWindow>,
     dialog: Option<FormWindow>,
@@ -180,6 +183,7 @@ impl Shell {
             last_hot: None,
             fullscreen: false,
             maximized_on: None,
+            offset_read: None,
             last_anim: Instant::now(),
             settings: None,
             dialog: None,
@@ -1682,6 +1686,13 @@ impl ApplicationHandler<UserEvent> for Shell {
         self.model
             // Banners wait while the notch is a locked stripe.
             .set_panel_state(self.expanded(), !self.notch.is_locked(), Now::real());
+        if self
+            .offset_read
+            .is_none_or(|t| t.elapsed() >= Duration::from_secs(60))
+        {
+            self.offset_read = Some(Instant::now());
+            self.model.set_utc_offset(crate::sys::utc_offset_seconds());
+        }
         let fx = self.model.tick(Now::real());
         let queued = std::mem::take(&mut self.queued);
         self.run_effects(el, fx.into_iter().chain(queued).collect());

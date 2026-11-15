@@ -43,6 +43,7 @@ pub enum Icon {
     Type,
     Ocr,
     Lock,
+    Calendar,
 }
 
 impl Icon {
@@ -80,11 +81,13 @@ impl Icon {
         Icon::Type,
         Icon::Ocr,
         Icon::Lock,
+        Icon::Calendar,
     ];
 
     /// The icon shown for a panel tab.
     pub fn for_tab(tab: Tab) -> Icon {
         match tab {
+            Tab::Today => Icon::Calendar,
             Tab::Media => Icon::Music,
             Tab::Tasks => Icon::Check,
             Tab::Clipboard => Icon::Clipboard,
@@ -259,6 +262,14 @@ fn shape(g: &mut G, icon: Icon) {
         Icon::Pin => {
             g.circle(12.0, 8.0, 4.5);
             g.line(&[(12.0, 12.5), (12.0, 21.0)]);
+        }
+        Icon::Calendar => {
+            g.rrect(3.5, 5.0, 17.0, 15.5, 2.5);
+            g.line(&[(3.5, 10.0), (20.5, 10.0)]);
+            g.line(&[(8.0, 3.0), (8.0, 7.0)]);
+            g.line(&[(16.0, 3.0), (16.0, 7.0)]);
+            g.dot(8.5, 14.5, 1.2);
+            g.dot(12.0, 14.5, 1.2);
         }
         Icon::Lock => {
             // Shackle, then the body.

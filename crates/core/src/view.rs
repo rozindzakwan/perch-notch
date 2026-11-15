@@ -15,6 +15,8 @@ use crate::todo::TodoId;
 /// Tabs in the expanded notch. Only tabs whose feature is live are shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Tab {
+    /// Time, date and location (always first).
+    Today,
     /// Now playing.
     Media,
     /// To-do + Pomodoro + reminders.
@@ -39,6 +41,7 @@ impl Tab {
     /// Short label for the tab strip.
     pub fn label(&self) -> &'static str {
         match self {
+            Tab::Today => "Today",
             Tab::Media => "Music",
             Tab::Tasks => "Tasks",
             Tab::Clipboard => "Clips",
@@ -184,6 +187,17 @@ pub enum CollapsedView {
     },
     /// A transient message (reminder, notification fallback).
     Message(String),
+}
+
+/// Today tab contents.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TodayView {
+    /// "14:05".
+    pub time: String,
+    /// "Sunday, 15 November".
+    pub date: String,
+    /// Place name, when the location feature knows it.
+    pub location: Option<String>,
 }
 
 /// Media tab contents.
@@ -384,6 +398,8 @@ pub struct UsageBar {
 /// The body of the expanded panel.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Body {
+    /// Time, date and location.
+    Today(TodayView),
     /// Media.
     Media(MediaView),
     /// Tasks.

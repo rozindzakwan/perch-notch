@@ -8,6 +8,7 @@
 
 pub mod anim;
 pub mod clipboard;
+pub mod clock;
 pub mod config;
 pub mod error;
 pub mod geometry;
