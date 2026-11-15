@@ -35,6 +35,9 @@ use crate::persist::{self, Status};
 const FRAME_INTERVAL: Duration = Duration::from_millis(8);
 /// Logical size of a banner: the notch opened halfway.
 const BANNER_SIZE: (f32, f32) = (360.0, 88.0);
+/// Logical size of the stripe the notch rests as over fullscreen and maximized
+/// apps.
+const STRIPE_SIZE: (f32, f32) = (120.0, 5.0);
 /// Debounce for config-file change notifications (editors write in bursts).
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(150);
 
@@ -92,6 +95,8 @@ pub struct Shell {
     last_pill: Option<(Rect, bool)>,
     last_hot: Option<Rect>,
     fullscreen: bool,
+    /// Monitor (id) whose foreground window is maximized, if any.
+    maximized_on: Option<u32>,
     last_anim: Instant,
     settings: Option<FormWindow>,
     dialog: Option<FormWindow>,
@@ -174,6 +179,7 @@ impl Shell {
             last_pill: None,
             last_hot: None,
             fullscreen: false,
+            maximized_on: None,
             last_anim: Instant::now(),
             settings: None,
             dialog: None,
@@ -239,16 +245,23 @@ impl Shell {
             self.motion
                 .target_size(min as f32, self.model.panel_height_hint() as f32);
         }
-        let banner = self.model.has_banner();
+        let stripe = self.notch.is_stripe();
+        let banner = self.model.has_banner() && !stripe;
         self.notch.set_banner(banner);
         if banner {
             self.motion.target_size(
                 BANNER_SIZE.0.max(min as f32),
                 self.model.panel_height_hint() as f32,
             );
+        } else if stripe {
+            // Something is in front: just a thin bar until hovered.
+            self.motion
+                .target_size(STRIPE_SIZE.0, self.model.panel_height_hint() as f32);
         }
         self.motion.target_pill_height(if banner {
             BANNER_SIZE.1
+        } else if stripe {
+            STRIPE_SIZE.1
         } else {
             geo.collapsed.1 as f32
         });
@@ -471,6 +484,8 @@ impl Shell {
             state: format!("{:?}", self.notch.state()),
             pill,
             visible,
+            stripe: self.notch.is_stripe(),
+            obscured: self.notch.is_obscured(),
             tab: self
                 .model
                 .tab()
@@ -534,10 +549,9 @@ impl Shell {
                 self.reduced,
             );
         }
-        if old.notch.hide_on_fullscreen != cfg.notch.hide_on_fullscreen && self.fullscreen {
-            self.notch
-                .handle(NotchEvent::FullscreenChanged(cfg.notch.hide_on_fullscreen));
-        }
+        self.notch
+            .set_reveal_delay(Duration::from_millis(u64::from(cfg.notch.reveal_delay_ms)));
+        self.sync_obscured();
         self.sync_autostart();
         self.monitor = None;
         self.last_pill = None;
@@ -927,6 +941,18 @@ impl Shell {
         }
     }
 
+    /// Tell the notch whether something sits in front of it: a fullscreen
+    /// app, or a maximized window on the notch's own monitor (and the
+    /// setting is on). Returns true when that changed.
+    fn sync_obscured(&mut self) -> bool {
+        let on_ours = match (self.maximized_on, self.resolve_monitor()) {
+            (Some(id), Some(m)) => id == m.id,
+            _ => false,
+        };
+        let obscured = self.config().notch.hide_on_fullscreen && (self.fullscreen || on_ours);
+        self.notch.handle(NotchEvent::ObscuredChanged(obscured))
+    }
+
     fn after_notch_change(&mut self, el: &ActiveEventLoop) {
         self.last_anim = Instant::now();
         self.place();
@@ -958,9 +984,13 @@ impl Shell {
         match ev {
             PlatformEvent::FullscreenChanged(fs) => {
                 self.fullscreen = fs;
-                if self.config().notch.hide_on_fullscreen
-                    && self.notch.handle(NotchEvent::FullscreenChanged(fs))
-                {
+                if self.sync_obscured() {
+                    self.after_notch_change(el);
+                }
+            }
+            PlatformEvent::MaximizedChanged(on) => {
+                self.maximized_on = on;
+                if self.sync_obscured() {
                     self.after_notch_change(el);
                 }
             }
@@ -968,6 +998,7 @@ impl Shell {
                 self.monitor = None;
                 self.last_pill = None;
                 self.last_hot = None;
+                self.sync_obscured();
                 self.place();
             }
             PlatformEvent::WindowManagerChanged => {
@@ -1323,11 +1354,11 @@ impl ApplicationHandler<UserEvent> for Shell {
         self.services.watch_config(self.store.path());
         self.sync_autostart();
 
-        if self.config().notch.hide_on_fullscreen && self.services.fullscreen.is_fullscreen_active()
-        {
-            self.fullscreen = true;
-            self.notch.handle(NotchEvent::FullscreenChanged(true));
-        }
+        self.fullscreen = self.services.fullscreen.is_fullscreen_active();
+        self.notch.set_reveal_delay(Duration::from_millis(u64::from(
+            self.config().notch.reveal_delay_ms,
+        )));
+        self.sync_obscured();
         self.place();
         self.request_redraw();
         el.set_control_flow(ControlFlow::Wait);
@@ -1624,7 +1655,8 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
         }
         self.model
-            .set_panel_state(self.expanded(), self.notch.is_visible(), Now::real());
+            // Banners wait while something is in front (the notch is a stripe).
+            .set_panel_state(self.expanded(), !self.notch.is_obscured(), Now::real());
         let fx = self.model.tick(Now::real());
         let queued = std::mem::take(&mut self.queued);
         self.run_effects(el, fx.into_iter().chain(queued).collect());

@@ -6,7 +6,8 @@
 #     ABOVE + STICKY + SKIP_TASKBAR + SKIP_PAGER, with no strut
 #   - hovering the top edge (xdotool) expands the pill; leaving collapses it
 #   - CLI verbs reach the running instance over the Unix socket
-#   - a fullscreen window hides the pill, and un-fullscreening brings it back
+#   - over a fullscreen or maximized window the notch is a thin stripe that
+#     opens only after a 3 s hover
 #   - idle memory / CPU
 # and saves screenshots as evidence.
 #
@@ -275,18 +276,39 @@ if [ -n "$SHOT" ]; then
 fi
 xdotool mousemove $((MX + 40)) $AWAY
 
-# Fullscreen auto-hide (EWMH _NET_WM_STATE_FULLSCREEN via the WM). The
-# victim is Perch's own settings window: a normal, focusable top-level.
+# Auto-hide: over a fullscreen app (EWMH _NET_WM_STATE_FULLSCREEN via the WM)
+# or a maximized window the notch rests as a thin stripe, and hovering it
+# opens the notch only after 3 s. The victim is Perch's own settings window:
+# a normal, focusable top-level.
 "$BIN" settings
 sleep 1
 wmctrl -a "Perch settings" || true
 sleep 0.5
 wmctrl -r "Perch settings" -b add,fullscreen
-sleep 1
-check fullscreen_hides "$([ "$(STATUS .visible)" = false ] && echo 1 || echo 0)" "visible=$(STATUS .visible)"
+sleep 1.2
+read -r _ _ SW SH <<<"$(geom)"
+check fullscreen_stripes "$([ "$(STATUS .stripe)" = true ] && [ "$(STATUS .visible)" = true ] && [ "$SH" -le 8 ] && echo 1 || echo 0)" "stripe=$(STATUS .stripe), ${SW}x${SH}"
+import -window root -crop 560x40+$CROPX+$TOP "$OUT/x11-stripe-$COMP.png" 2>/dev/null || true
+# (Over a focused fullscreen window the X11 window manager stacks the app
+# above every dock, so the stripe can't be hovered there; the hover reveal is
+# checked over a maximized window below, where the stripe stays on top.)
 wmctrl -r "Perch settings" -b remove,fullscreen
 sleep 1
-check unfullscreen_shows "$([ "$(STATUS .visible)" = true ] && echo 1 || echo 0)" "visible=$(STATUS .visible)"
+check unfullscreen_restores "$([ "$(STATUS .stripe)" = false ] && [ "$(STATUS .obscured)" = false ] && echo 1 || echo 0)" "stripe=$(STATUS .stripe)"
+wmctrl -r "Perch settings" -b add,maximized_vert,maximized_horz
+sleep 1.2
+check maximized_stripes "$([ "$(STATUS .stripe)" = true ] && echo 1 || echo 0)" "stripe=$(STATUS .stripe)"
+xdotool mousemove $CX $TOP
+sleep 1.5
+check stripe_hover_waits "$([ "$(STATUS .state)" = Collapsed ] && echo 1 || echo 0)" "state after 1.5 s: $(STATUS .state)"
+sleep 2.3
+check stripe_hover_reveals "$([ "$(STATUS .state)" = Expanded ] && echo 1 || echo 0)" "state after 3.8 s: $(STATUS .state)"
+xdotool mousemove $((MX + 40)) $AWAY
+sleep 1.2
+check stripe_returns "$([ "$(STATUS .stripe)" = true ] && echo 1 || echo 0)" "stripe=$(STATUS .stripe), state $(STATUS .state)"
+wmctrl -r "Perch settings" -b remove,maximized_vert,maximized_horz
+sleep 1
+check unmaximized_restores "$([ "$(STATUS .stripe)" = false ] && echo 1 || echo 0)" "stripe=$(STATUS .stripe)"
 wmctrl -c "Perch settings" || true
 sleep 0.5
 check screen_time_records "$([ "$(STATUS .usage_apps)" -ge 1 ] 2>/dev/null && echo 1 || echo 0)" "apps today=$(STATUS .usage_apps)"

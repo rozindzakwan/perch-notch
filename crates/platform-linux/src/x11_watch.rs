@@ -19,7 +19,9 @@ use x11rb::protocol::xproto::{
 };
 use x11rb::rust_connection::RustConnection;
 
-use crate::x11::{active_window, connect, intern, is_fullscreen, window_app, Atoms};
+use crate::x11::{
+    active_window, connect, intern, is_fullscreen, is_maximized, window_app, window_centre, Atoms,
+};
 
 static SHELL_CONN: std::sync::OnceLock<Option<(RustConnection, usize)>> =
     std::sync::OnceLock::new();
@@ -204,6 +206,7 @@ struct WatchState {
     type_desktop: Atom,
     active: Option<Window>,
     last_fullscreen: Option<bool>,
+    last_maximized: Option<Option<u32>>,
     last_app: String,
     clipboard_on: bool,
     /// Grabbed (keycode, modifier mask, id).
@@ -275,6 +278,7 @@ impl X11Watcher {
             type_desktop: intern(&conn, "_NET_WM_WINDOW_TYPE_DESKTOP")?,
             active: None,
             last_fullscreen: None,
+            last_maximized: None,
             last_app: String::new(),
             clipboard_on: false,
             grabs: Vec::new(),
@@ -508,6 +512,35 @@ fn check_fullscreen(conn: &RustConnection, st: &mut WatchState, sink: &EventSink
     if st.last_fullscreen != Some(fs) {
         st.last_fullscreen = Some(fs);
         sink(PlatformEvent::FullscreenChanged(fs));
+    }
+
+    // A maximized window (both ways) on some monitor: report which one, so
+    // only the notch on that monitor shrinks to a stripe.
+    let maximized = match st.active {
+        Some(w)
+            if !is_desktop_window(conn, st, w)
+                && is_maximized(conn, w, &st.atoms).unwrap_or(false) =>
+        {
+            window_centre(conn, w, st.root).and_then(|(cx, cy)| {
+                use perch_core::platform::MonitorSource;
+                crate::x11::X11Monitors
+                    .monitors()
+                    .ok()?
+                    .into_iter()
+                    .find(|m| {
+                        cx >= m.x
+                            && cy >= m.y
+                            && cx < m.x + m.width as i32
+                            && cy < m.y + m.height as i32
+                    })
+                    .map(|m| m.id)
+            })
+        }
+        _ => None,
+    };
+    if st.last_maximized != Some(maximized) {
+        st.last_maximized = Some(maximized);
+        sink(PlatformEvent::MaximizedChanged(maximized));
     }
 }
 

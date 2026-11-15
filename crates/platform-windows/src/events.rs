@@ -6,8 +6,8 @@
 //!
 //! | OS signal | Event |
 //! |---|---|
-//! | `EVENT_SYSTEM_FOREGROUND` | `FullscreenChanged`, `ActiveWindowChanged` |
-//! | `EVENT_OBJECT_LOCATIONCHANGE` (foreground process only) | `FullscreenChanged` (F11, video players) |
+//! | `EVENT_SYSTEM_FOREGROUND` | `FullscreenChanged`, `MaximizedChanged`, `ActiveWindowChanged` |
+//! | `EVENT_OBJECT_LOCATIONCHANGE` (foreground process only) | `FullscreenChanged` (F11, video players), `MaximizedChanged` |
 //! | `WM_DISPLAYCHANGE`, `WM_SETTINGCHANGE(SPI_SETWORKAREA)` | `MonitorsChanged` |
 //! | `WM_WTSSESSION_CHANGE` lock/unlock | `SessionLocked` |
 //! | `WM_CLIPBOARDUPDATE` (only while the clipboard feature is on) | `ClipboardChanged` |
@@ -79,6 +79,7 @@ struct State {
     monitors: Vec<Monitor>,
     hwnd: HWND,
     last_fullscreen: Option<bool>,
+    last_maximized: Option<Option<u32>>,
     last_app: String,
     location_hook: Option<HWINEVENTHOOK>,
     location_pid: u32,
@@ -192,6 +193,7 @@ fn run(
             monitors: WindowsMonitors.monitors().unwrap_or_default(),
             hwnd,
             last_fullscreen: None,
+            last_maximized: None,
             last_app: String::new(),
             location_hook: None,
             location_pid: 0,
@@ -498,6 +500,41 @@ fn check_fullscreen() {
         }
         emit(PlatformEvent::FullscreenChanged(fs));
     }
+
+    let maximized = maximized_monitor(&monitors);
+    let changed = with_state(|st| {
+        if st.last_maximized != Some(maximized) {
+            st.last_maximized = Some(maximized);
+            true
+        } else {
+            false
+        }
+    })
+    .unwrap_or(false);
+    if changed {
+        emit(PlatformEvent::MaximizedChanged(maximized));
+    }
+}
+
+/// The monitor (id) on which the foreground window is maximized, if it is.
+pub fn maximized_monitor(monitors: &[Monitor]) -> Option<u32> {
+    // SAFETY: no arguments.
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.is_invalid() || NOT_FULLSCREEN_CLASSES.contains(&class_name(hwnd).as_str()) {
+        return None;
+    }
+    // SAFETY: `hwnd` is a window handle from the OS; no other arguments.
+    if !unsafe { IsZoomed(hwnd) }.as_bool() {
+        return None;
+    }
+    let mut rect = RECT::default();
+    // SAFETY: `hwnd` from the OS; `rect` a valid local.
+    unsafe { GetWindowRect(hwnd, &mut rect) }.ok()?;
+    let (cx, cy) = ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+    monitors
+        .iter()
+        .find(|m| cx >= m.x && cy >= m.y && cx < m.x + m.width as i32 && cy < m.y + m.height as i32)
+        .map(|m| m.id)
 }
 
 /// Windows that cover a whole monitor without being "a fullscreen app".

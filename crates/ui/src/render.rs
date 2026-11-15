@@ -187,8 +187,11 @@ impl Renderer {
                 draw_panel(&mut ctx, view, panel, frame);
             }
         } else {
-            // The pill's own content fades out as the panel starts to grow.
-            ctx.alpha = (1.0 - frame.progress / 0.3).clamp(0.0, 1.0);
+            // The pill's own content fades out as the panel starts to grow,
+            // and as the pill shrinks into the thin stripe shown over
+            // fullscreen and maximized apps (gone below 8 px).
+            let by_height = ((panel.3 / s - 8.0) / 16.0).clamp(0.0, 1.0);
+            ctx.alpha = (1.0 - frame.progress / 0.3).clamp(0.0, 1.0) * by_height;
             if ctx.alpha > 0.0 {
                 draw_pill(&mut ctx, &view.collapsed, panel);
             }

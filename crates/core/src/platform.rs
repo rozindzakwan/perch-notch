@@ -93,6 +93,9 @@ pub enum PlatformEvent {
     HotZoneLeft,
     /// The foreground window's fullscreen state changed.
     FullscreenChanged(bool),
+    /// The foreground window is maximized on this monitor (its id), or no
+    /// foreground window is maximized (`None`).
+    MaximizedChanged(Option<u32>),
     /// Media backend news.
     Media(MediaEvent),
     /// A CLI command arrived over single-instance IPC.

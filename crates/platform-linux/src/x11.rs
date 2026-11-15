@@ -40,6 +40,10 @@ pub struct Atoms {
     pub state_skip_pager: Atom,
     /// `_NET_WM_STATE_FULLSCREEN`
     pub state_fullscreen: Atom,
+    /// `_NET_WM_STATE_MAXIMIZED_VERT`
+    pub state_max_vert: Atom,
+    /// `_NET_WM_STATE_MAXIMIZED_HORZ`
+    pub state_max_horz: Atom,
     /// `_NET_ACTIVE_WINDOW`
     pub active_window: Atom,
     /// `_NET_WM_DESKTOP`
@@ -73,6 +77,8 @@ impl Atoms {
             state_skip_taskbar: intern(conn, "_NET_WM_STATE_SKIP_TASKBAR")?,
             state_skip_pager: intern(conn, "_NET_WM_STATE_SKIP_PAGER")?,
             state_fullscreen: intern(conn, "_NET_WM_STATE_FULLSCREEN")?,
+            state_max_vert: intern(conn, "_NET_WM_STATE_MAXIMIZED_VERT")?,
+            state_max_horz: intern(conn, "_NET_WM_STATE_MAXIMIZED_HORZ")?,
             active_window: intern(conn, "_NET_ACTIVE_WINDOW")?,
             wm_desktop: intern(conn, "_NET_WM_DESKTOP")?,
             wm_pid: intern(conn, "_NET_WM_PID")?,
@@ -198,6 +204,31 @@ pub fn is_fullscreen(conn: &RustConnection, win: Window, atoms: &Atoms) -> Resul
         .map(|v| v.into_iter().any(|a| a == atoms.state_fullscreen))
         .unwrap_or(false);
     Ok(fullscreen)
+}
+
+/// Whether a window is maximized both ways (EWMH `_NET_WM_STATE`).
+pub fn is_maximized(conn: &RustConnection, win: Window, atoms: &Atoms) -> Result<bool> {
+    let reply = conn
+        .get_property(false, win, atoms.wm_state, AtomEnum::ATOM, 0, 32)
+        .map_err(|e| Error::backend(format!("get _NET_WM_STATE: {e}")))?
+        .reply()
+        .map_err(|e| Error::backend(format!("get _NET_WM_STATE reply: {e}")))?;
+    let states: Vec<u32> = reply.value32().map(|v| v.collect()).unwrap_or_default();
+    Ok(states.contains(&atoms.state_max_vert) && states.contains(&atoms.state_max_horz))
+}
+
+/// The window's centre in root coordinates.
+pub fn window_centre(conn: &RustConnection, win: Window, root: Window) -> Option<(i32, i32)> {
+    let g = conn.get_geometry(win).ok()?.reply().ok()?;
+    let t = conn
+        .translate_coordinates(win, root, 0, 0)
+        .ok()?
+        .reply()
+        .ok()?;
+    Some((
+        i32::from(t.dst_x) + i32::from(g.width) / 2,
+        i32::from(t.dst_y) + i32::from(g.height) / 2,
+    ))
 }
 
 /// The application name of a window, from `WM_CLASS`, for screen-time tracking.

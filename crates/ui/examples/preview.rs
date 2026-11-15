@@ -290,7 +290,11 @@ fn main() {
                     options: vec!["System".into(), "Dark".into(), "Light".into()],
                     selected: 1,
                 },
-                toggle("fs", "Hide while a fullscreen app is active", true),
+                toggle(
+                    "fs",
+                    "Shrink to a stripe over fullscreen and maximized apps",
+                    true,
+                ),
                 toggle("auto", "Start at login", false),
                 Field::Group("Notifications".into()),
                 toggle("n1", "Show notifications in the notch", true),

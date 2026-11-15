@@ -356,20 +356,54 @@ try {
     # 1.5 s later, so allow up to 3 s.
     for ($i = 0; $i -lt 20; $i++) {
         $st = Read-Status
-        if ($st -and $st.visible -eq $false) { break }
+        if ($st -and $st.stripe -eq $true) { break }
         [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100
     }
     if ($isFg) {
-        Check 'fullscreen_hides' ($st.visible -eq $false) "visible=$($st.visible)"
+        # Over a fullscreen app the notch rests as a thin stripe...
+        Start-Sleep -Milliseconds 500
+        $r = Get-LiveRect $pillHandle
+        Check 'fullscreen_stripes' ($st.stripe -eq $true -and $st.visible -eq $true -and $r.H -le 8) "stripe=$($st.stripe), $($r.W)x$($r.H)"
+        # ...that opens only after the pointer rests on it for 3 s.
+        Move-MouseAbsolute ([int]($screen.Width/2)) 0
+        for ($i = 0; $i -lt 15; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+        $st = Read-Status
+        Check 'stripe_hover_waits' ($st.state -eq 'Collapsed') "state after 1.5 s: $($st.state)"
+        for ($i = 0; $i -lt 23; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+        $st = Read-Status
+        Check 'stripe_hover_reveals' ($st.state -eq 'Expanded') "state after 3.8 s: $($st.state)"
+        Move-MouseAbsolute $parkX $parkY
+        for ($i = 0; $i -lt 12; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+        $st = Read-Status
+        Check 'stripe_returns' ($st.stripe -eq $true) "stripe=$($st.stripe), state $($st.state)"
     } else {
-        Write-Host "[INFO] fullscreen_hides: skipped, Windows refused to give the test window the foreground (foreground lock)"
-        $results['fullscreen_hides'] = @{ ok = $true; detail = 'skipped: foreground lock' }
+        Write-Host "[INFO] fullscreen_stripes: skipped, Windows refused to give the test window the foreground (foreground lock)"
+        $results['fullscreen_stripes'] = @{ ok = $true; detail = 'skipped: foreground lock' }
     }
     $form.Close(); $form.Dispose()
     # The shell's quiet state lags; Perch re-checks 1.5 s after a focus change.
     for ($i = 0; $i -lt 25; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
     $st = Read-Status
-    Check 'unfullscreen_shows' ($st.visible -eq $true) "visible=$($st.visible)"
+    Check 'unfullscreen_restores' ($st.stripe -eq $false -and $st.obscured -eq $false) "stripe=$($st.stripe)"
+
+    # A maximized window: the notch rests as a stripe too.
+    $max = New-Object System.Windows.Forms.Form
+    $max.Text = 'Perch smoke maximized'
+    $max.WindowState = 'Maximized'
+    $max.Show()
+    $max.Activate()
+    [PerchNative]::SetForegroundWindow($max.Handle) | Out-Null
+    for ($i = 0; $i -lt 15; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+    if ([PerchNative]::GetForegroundWindow() -eq $max.Handle) {
+        $st = Read-Status
+        Check 'maximized_stripes' ($st.stripe -eq $true) "stripe=$($st.stripe)"
+    } else {
+        Write-Host "[INFO] maximized_stripes: skipped (foreground lock)"
+    }
+    $max.Close(); $max.Dispose()
+    for ($i = 0; $i -lt 10; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
+    $st = Read-Status
+    Check 'unmaximized_restores' ($st.stripe -eq $false) "stripe=$($st.stripe)"
     # The foreground changes above (to the test window and back) are what
     # screen time records.
     Check 'screen_time_records' ($st.usage_apps -ge 1) "apps today=$($st.usage_apps)"

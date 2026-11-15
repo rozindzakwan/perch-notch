@@ -57,14 +57,20 @@ config file.
 
 Also included: a tray icon (Windows notification area / Linux
 StatusNotifierItem with an XEmbed fallback), a settings window, live reload of
-the config file, start-at-login, a hide-while-fullscreen option, global
-hotkeys, and a command line that talks to the running instance.
+the config file, start-at-login, global hotkeys, and a command line that
+talks to the running instance.
+
+**Stays out of the way.** While a fullscreen app (a game, a video, F11) or a
+maximized window is in front, the notch shrinks to a thin stripe at the top
+of the screen. Rest the pointer on the stripe for three seconds to open it;
+move away and it shrinks back. The hotkey still opens it at once, and
+notifications wait until the app is no longer in front.
 
 Notifications (new mail, due to-dos, Pomodoro phases, reminders and, if you
 turn it on, other apps' notifications) **open the notch halfway** for four
 seconds with just the essentials: who, what, and two lines of text. Hover
-to keep it, click it to open the matching tab. They wait while a fullscreen app is
-active. System notifications are off by default and can be turned on in
+to keep it, click it to open the matching tab. They wait while a fullscreen
+app or maximized window is in front. System notifications are off by default and can be turned on in
 settings (`[notifications] system = true`).
 
 ![A to-do banner in the notch](docs/img/banner.png)
@@ -92,7 +98,7 @@ How each claim was checked:
 | Pill + hover expand/collapse, no focus stealing | verified on Windows (11; 10 untested) | CI-verified (container) | CI-verified (openbox), others untested | not implemented |
 | Always on top, not in taskbar/Alt-Tab | verified on Windows | CI-verified (dock + ABOVE/STICKY/SKIP_*, survives a WM restart) | same | — |
 | Transparent rounded pill | verified on Windows | rendered with picom (ARGB) and without a compositor (XShape); screenshots only, no automated pixel check | same | — |
-| Hide when an app is fullscreen | verified on Windows | CI-verified (EWMH fullscreen) | same | — |
+| Stripe over fullscreen and maximized apps, 3 s hover to open | verified on Windows | CI-verified (EWMH fullscreen and maximized) | same | — |
 | Tray icon | verified on Windows | implemented, untested on Cinnamon (`xapp-sn-watcher`); XEmbed fallback CI-verified to start | implemented, untested | — |
 | CLI → running instance | verified on Windows (named pipe) | CI-verified (Unix socket) | same | — |
 | Global hotkeys | verified on Windows (RegisterHotKey) | CI-verified (XGrabKey) | same | not implemented |
@@ -212,7 +218,8 @@ save it:
 [notch]
 position = "top-center"    # also top-left, top-right, bottom-*, left/right-center
 monitor = 0                # omit for the primary monitor
-hide_on_fullscreen = true
+hide_on_fullscreen = true  # shrink to a stripe over fullscreen and maximized apps
+reveal_delay_ms = 3000     # hover the stripe this long to open the notch
 collapse_delay_ms = 220
 
 [features]
@@ -346,6 +353,12 @@ writes `artifacts/mint/mint-results.md`.
 
 ## Known limitations
 
+- **On Linux the stripe sits under fullscreen apps.** X11 window managers
+  (Openbox, Muffin) stack a focused fullscreen window above every dock, so
+  over a fullscreen video or game the stripe can't be seen or hovered there.
+  Over maximized windows it works as on Windows. On Windows the always-on-top
+  notch stays above borderless fullscreen apps; exclusive (D3D) fullscreen
+  games are drawn above everything.
 - **Wayland isn't implemented.** There's no layer-shell window, portal
   screenshots or GlobalShortcuts portal yet. Use an X11 session.
 - **Dictation on Windows needs the MSVC toolchain.** whisper.cpp's build passes

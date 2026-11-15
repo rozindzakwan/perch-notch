@@ -746,3 +746,31 @@ fn a_mirrored_notification_banner_shows_the_app_and_two_lines_of_text() {
         caption_row(&bare)
     );
 }
+
+#[test]
+fn a_stripe_shows_only_the_bar_not_the_pill_content() {
+    let with = |collapsed: CollapsedView| PanelView {
+        collapsed,
+        ..PanelView::default()
+    };
+    let pill = CollapsedView::Pill {
+        thumb: None,
+        glyph: Some(perch_core::view::Glyph::Music),
+        text: "Die For You".into(),
+        badges: vec![],
+    };
+    let (stripe, _) = render(&with(pill.clone()), 120, 5, 1.0, 0.0);
+    let (bare, _) = render(&with(CollapsedView::Idle), 120, 5, 1.0, 0.0);
+    assert_eq!(
+        stripe.data(),
+        bare.data(),
+        "no text or icons squeezed into the stripe"
+    );
+    let (full, _) = render(&with(pill), 200, 32, 1.0, 0.0);
+    let (bare, _) = render(&with(CollapsedView::Idle), 200, 32, 1.0, 0.0);
+    assert_ne!(
+        full.data(),
+        bare.data(),
+        "the normal pill still shows its content"
+    );
+}

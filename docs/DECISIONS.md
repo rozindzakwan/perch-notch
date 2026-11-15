@@ -439,3 +439,31 @@ still shows its own popup and answers the call. Markup and entities in the
 body (`<b>`, `<a href>`, `&amp;`) are stripped to plain text, and Perch's own
 notifications are skipped. Closing the connection stops the reader. Tested
 on a private bus against a fake daemon (`tests/session_bus.rs`).
+
+## ADR-021: A stripe instead of hiding, over fullscreen and maximized apps
+
+The notch used to disappear while a fullscreen app was in front. The user
+wanted it to stay reachable without disturbing them, and for maximized
+windows too, since the notch sits on top of their title bar and content.
+
+**Decision.** While a fullscreen app or a maximized window is in front of
+the notch's monitor (and `[notch] hide_on_fullscreen` is on, as by default),
+the collapsed notch shrinks to a 120×5 stripe. Hovering the stripe starts a
+`reveal_delay_ms` (3 s) timer: leaving cancels it, staying opens the notch,
+and moving away shrinks it back to the stripe. The hotkey, the CLI and a
+banner click still open it at once. Banners wait until nothing is in front.
+The pill's content fades with its height, so the shrink animation is smooth
+and the stripe is a plain bar. The timer is one deadline, so nothing runs
+while the stripe rests (no wake-ups, 0 CPU).
+
+- Windows: the foreground hook already re-checks fullscreen on focus and
+  location changes; it now also reports which monitor holds a maximized
+  foreground window (`IsZoomed` + window centre), so a maximized window on
+  another monitor leaves this one alone.
+- X11: the watcher already follows the active window's `_NET_WM_STATE`; it
+  now also reports `_NET_WM_STATE_MAXIMIZED_VERT` + `_HORZ` with the monitor
+  under the window's centre.
+- Limitation: X11 window managers stack a focused fullscreen window above
+  docks, so there the stripe is covered and can't be hovered (it works over
+  maximized windows). Making the notch an override-redirect window would get
+  around that, at the cost of managing its stacking ourselves.

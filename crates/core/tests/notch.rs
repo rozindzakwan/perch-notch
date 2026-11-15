@@ -175,40 +175,93 @@ fn pointer_entering_the_pill_cancels_a_pending_collapse() {
 }
 
 #[test]
-fn fullscreen_hides_the_notch_and_restores_it_afterwards() {
+fn an_obscuring_app_shrinks_the_notch_to_a_stripe_and_restores_it() {
     let mut n = notch();
-    assert!(n.is_visible());
-    let changed = n.handle(NotchEvent::FullscreenChanged(true));
-    assert!(changed);
-    assert!(!n.is_visible(), "hidden while a fullscreen app is focused");
-    assert!(!n.wants_animation(), "no rendering while hidden");
-
-    n.handle(NotchEvent::FullscreenChanged(false));
-    assert!(n.is_visible());
+    assert!(!n.is_stripe());
+    assert!(n.handle(NotchEvent::ObscuredChanged(true)));
+    assert!(n.is_visible(), "still shown, as a thin stripe");
+    assert!(n.is_stripe());
+    assert!(
+        !n.wants_animation(),
+        "no rendering while it rests as a stripe"
+    );
+    assert_eq!(n.next_deadline(), None, "and no wake-ups");
+    n.handle(NotchEvent::ObscuredChanged(false));
+    assert!(!n.is_stripe());
 }
 
 #[test]
-fn hover_while_fullscreen_does_not_expand() {
+fn hovering_the_stripe_opens_the_notch_only_after_three_seconds() {
     let mut n = notch();
-    n.handle(NotchEvent::FullscreenChanged(true));
+    n.handle(NotchEvent::ObscuredChanged(true));
     n.handle(NotchEvent::HotZoneEntered);
-    n.advance(Duration::from_millis(500));
-    assert_eq!(n.state(), NotchState::Collapsed);
-    assert!(!n.is_visible());
-}
-
-#[test]
-fn leaving_fullscreen_while_hovering_expands_once_visible_again() {
-    let mut n = notch();
-    n.handle(NotchEvent::FullscreenChanged(true));
-    n.handle(NotchEvent::HotZoneEntered);
-    n.handle(NotchEvent::FullscreenChanged(false));
-    open_fully(&mut n);
+    assert_eq!(
+        n.next_deadline(),
+        Some(Duration::from_secs(3)),
+        "wakes once, for the reveal"
+    );
+    n.advance(Duration::from_millis(2_900));
     assert_eq!(
         n.state(),
-        NotchState::Expanded,
-        "the remembered hover is honored"
+        NotchState::Collapsed,
+        "a passing pointer does nothing"
     );
+    assert!(n.is_stripe());
+    n.advance(Duration::from_millis(200));
+    open_fully(&mut n);
+    assert_eq!(n.state(), NotchState::Expanded, "3 s of hovering opens it");
+    assert!(!n.is_stripe());
+    // Leaving closes it back down to the stripe.
+    n.handle(NotchEvent::HotZoneLeft);
+    for _ in 0..200 {
+        n.advance(Duration::from_millis(8));
+    }
+    assert_eq!(n.state(), NotchState::Collapsed);
+    assert!(n.is_stripe());
+}
+
+#[test]
+fn leaving_the_stripe_before_three_seconds_cancels_the_reveal() {
+    let mut n = notch();
+    n.handle(NotchEvent::ObscuredChanged(true));
+    n.handle(NotchEvent::HotZoneEntered);
+    n.advance(Duration::from_secs(2));
+    n.handle(NotchEvent::HotZoneLeft);
+    assert_eq!(n.next_deadline(), None);
+    n.advance(Duration::from_secs(5));
+    assert_eq!(n.state(), NotchState::Collapsed);
+    // A new hover starts the full 3 s again.
+    n.handle(NotchEvent::PointerEntered);
+    n.advance(Duration::from_secs(2));
+    assert_eq!(n.state(), NotchState::Collapsed);
+}
+
+#[test]
+fn the_hotkey_still_opens_the_stripe_at_once() {
+    let mut n = notch();
+    n.handle(NotchEvent::ObscuredChanged(true));
+    n.handle(NotchEvent::Toggle);
+    open_fully(&mut n);
+    assert_eq!(n.state(), NotchState::Expanded);
+}
+
+#[test]
+fn becoming_obscured_while_open_closes_to_the_stripe_unless_pinned() {
+    let mut n = notch();
+    n.handle(NotchEvent::HotZoneEntered);
+    open_fully(&mut n);
+    n.handle(NotchEvent::HotZoneLeft);
+    n.handle(NotchEvent::ObscuredChanged(true));
+    for _ in 0..200 {
+        n.advance(Duration::from_millis(8));
+    }
+    assert_eq!(n.state(), NotchState::Collapsed);
+    let mut p = notch();
+    p.handle(NotchEvent::Toggle);
+    open_fully(&mut p);
+    p.handle(NotchEvent::ObscuredChanged(true));
+    open_fully(&mut p);
+    assert_eq!(p.state(), NotchState::Expanded, "pinned stays open");
 }
 
 #[test]
@@ -305,8 +358,8 @@ fn repeated_identical_events_do_not_report_changes() {
         "already expanding, nothing changed"
     );
     assert!(
-        !n.handle(NotchEvent::FullscreenChanged(false)),
-        "already not fullscreen"
+        !n.handle(NotchEvent::ObscuredChanged(false)),
+        "already not obscured"
     );
 }
 

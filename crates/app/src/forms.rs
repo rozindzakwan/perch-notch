@@ -72,7 +72,7 @@ pub fn settings_spec(cfg: &Config, monitors: &[Monitor], mail: &MailBoard) -> Fo
     });
     fields.push(Field::Toggle {
         id: "hide_on_fullscreen".into(),
-        label: "Hide while a fullscreen app is active".into(),
+        label: "Shrink to a stripe over fullscreen and maximized apps".into(),
         value: cfg.notch.hide_on_fullscreen,
         disabled: false,
     });

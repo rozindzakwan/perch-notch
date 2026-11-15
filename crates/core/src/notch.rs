@@ -1,5 +1,6 @@
-//! The notch state machine: hover in, animate open, animate shut, hide for
-//! fullscreen apps.
+//! The notch state machine: hover in, animate open, animate shut, and rest as
+//! a thin stripe over fullscreen and maximized apps (hover it for a few
+//! seconds to open it).
 //!
 //! This type is driven entirely by events plus an explicit elapsed-time
 //! `advance`, so it is fully testable without a window system, and so the event
@@ -9,6 +10,8 @@ use std::time::Duration;
 
 use crate::anim::{ease_out, Spring};
 
+/// How long the pointer must rest on the stripe before the notch opens.
+pub const DEFAULT_REVEAL_DELAY: Duration = Duration::from_secs(3);
 /// How long the content takes to fade in once the panel is 40 % open.
 const CONTENT_FADE: Duration = Duration::from_millis(140);
 /// Content starts to appear at this open-ness.
@@ -39,8 +42,9 @@ pub enum NotchEvent {
     PointerEntered,
     /// The cursor left the pill.
     PointerLeft,
-    /// The foreground window became (or stopped being) fullscreen.
-    FullscreenChanged(bool),
+    /// A fullscreen app or a maximized window is (or stopped being) in front
+    /// of the notch: rest as a stripe that opens only after a long hover.
+    ObscuredChanged(bool),
     /// Keep the notch open until toggled again (hotkey / CLI / tray).
     Toggle,
     /// Force the notch shut, e.g. on Escape.
@@ -94,7 +98,11 @@ pub struct Notch {
     in_hot: bool,
     /// Pointer is over the pill.
     in_pill: bool,
-    fullscreen: bool,
+    /// Something sits under the notch: rest as a stripe.
+    obscured: bool,
+    /// Time left before a hover on the stripe opens the notch.
+    pending_reveal: Option<Duration>,
+    reveal_delay: Duration,
     pinned: bool,
 }
 
@@ -117,7 +125,9 @@ impl Notch {
             pending_collapse: None,
             in_hot: false,
             in_pill: false,
-            fullscreen: false,
+            obscured: false,
+            pending_reveal: None,
+            reveal_delay: DEFAULT_REVEAL_DELAY,
             pinned: false,
         }
     }
@@ -150,9 +160,25 @@ impl Notch {
         self.reduced || d.is_zero()
     }
 
-    /// Whether the window should be shown at all.
+    /// Whether the window should be shown at all (always: when something is
+    /// in front it shrinks to a stripe instead of disappearing).
     pub fn is_visible(&self) -> bool {
-        !self.fullscreen
+        true
+    }
+
+    /// Resting as a stripe: something is in front and the notch is closed.
+    pub fn is_stripe(&self) -> bool {
+        self.obscured && self.state == NotchState::Collapsed
+    }
+
+    /// Something sits in front of the notch (banners wait meanwhile).
+    pub fn is_obscured(&self) -> bool {
+        self.obscured
+    }
+
+    /// How long a hover on the stripe takes to open the notch.
+    pub fn set_reveal_delay(&mut self, d: Duration) {
+        self.reveal_delay = d;
     }
 
     /// Whether the notch is held open by a toggle.
@@ -177,7 +203,10 @@ impl Notch {
             // Next animation frame; the UI layer picks the real frame interval.
             return Some(Duration::from_millis(8));
         }
-        self.pending_collapse
+        match (self.pending_collapse, self.pending_reveal) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     /// Interpolated size for the renderer.
@@ -208,8 +237,11 @@ impl Notch {
                     self.in_pill = true;
                 }
                 self.pending_collapse = None;
-                if !self.is_visible() {
-                    // Remember the hover; it is honored when fullscreen ends.
+                if self.obscured && self.state == NotchState::Collapsed && !self.pinned {
+                    // A stripe: open only after the pointer rests on it.
+                    if !was_inside {
+                        self.pending_reveal = Some(self.reveal_delay);
+                    }
                     return !was_inside;
                 }
                 if self.banner && event == NotchEvent::PointerEntered && !self.in_hot {
@@ -231,6 +263,7 @@ impl Notch {
                 if self.inside() {
                     return false;
                 }
+                self.pending_reveal = None;
                 if self.pinned {
                     return was_inside;
                 }
@@ -246,20 +279,16 @@ impl Notch {
                     }
                 }
             }
-            NotchEvent::FullscreenChanged(fs) => {
-                if self.fullscreen == fs {
+            NotchEvent::ObscuredChanged(on) => {
+                if self.obscured == on {
                     return false;
                 }
-                self.fullscreen = fs;
-                if fs {
-                    // Hidden: stop all animation work immediately.
-                    self.state = NotchState::Collapsed;
-                    self.p = 0.0;
-                    self.spring.snap(0.0);
-                    self.content = 0.0;
+                self.obscured = on;
+                self.pending_reveal = None;
+                if on && !self.pinned && !self.inside() {
+                    // Something came to the front: close down to the stripe.
                     self.pending_collapse = None;
-                } else if self.inside() || self.pinned {
-                    self.start_expanding();
+                    self.start_collapsing();
                 }
                 true
             }
@@ -267,9 +296,7 @@ impl Notch {
                 self.pinned = !self.pinned;
                 if self.pinned {
                     self.pending_collapse = None;
-                    if !self.is_visible() {
-                        return true;
-                    }
+                    self.pending_reveal = None;
                     self.start_expanding();
                 } else if !self.inside() {
                     self.start_collapsing();
@@ -278,9 +305,7 @@ impl Notch {
             }
             NotchEvent::Open => {
                 self.pending_collapse = None;
-                if !self.is_visible() {
-                    return false;
-                }
+                self.pending_reveal = None;
                 self.start_expanding()
             }
             NotchEvent::ForceCollapse => {
@@ -288,6 +313,7 @@ impl Notch {
                 self.in_hot = false;
                 self.in_pill = false;
                 self.pending_collapse = None;
+                self.pending_reveal = None;
                 self.start_collapsing()
             }
         }
@@ -342,8 +368,16 @@ impl Notch {
 
     /// Advance time. Returns true when a redraw is needed.
     pub fn advance(&mut self, dt: Duration) -> bool {
-        if !self.is_visible() {
-            return false;
+        // A hover resting on the stripe opens the notch when its time is up.
+        if let Some(left) = self.pending_reveal {
+            if dt >= left {
+                self.pending_reveal = None;
+                if self.inside() {
+                    self.start_expanding();
+                }
+            } else {
+                self.pending_reveal = Some(left - dt);
+            }
         }
 
         // Time is consumed by the pending-collapse delay first; only the

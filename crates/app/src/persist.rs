@@ -73,8 +73,12 @@ pub struct Status {
     pub state: String,
     /// Pill window rect `[x, y, w, h]` in physical pixels.
     pub pill: [i64; 4],
-    /// Whether the pill is visible (false while a fullscreen app hides it).
+    /// Whether the pill window is shown.
     pub visible: bool,
+    /// Resting as a thin stripe (a fullscreen app or maximized window in front).
+    pub stripe: bool,
+    /// A fullscreen app or maximized window is in front of the notch.
+    pub obscured: bool,
     /// Selected tab.
     pub tab: String,
     /// Current track label.

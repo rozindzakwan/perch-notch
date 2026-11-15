@@ -52,8 +52,11 @@ pub struct NotchConfig {
     pub hot_zone_padding: u32,
     /// Delay before collapsing after the cursor leaves, in milliseconds.
     pub collapse_delay_ms: u32,
-    /// Hide the pill while a fullscreen app is in the foreground.
+    /// Shrink the notch to a thin stripe while a fullscreen app or a maximized
+    /// window is in front (the key keeps its old name for existing configs).
     pub hide_on_fullscreen: bool,
+    /// How long to hover the stripe before the notch opens.
+    pub reveal_delay_ms: u32,
     /// Corner radius override; `None` = fully rounded (height / 2).
     pub corner_radius: Option<u32>,
 }
@@ -73,6 +76,7 @@ impl Default for NotchConfig {
             hot_zone_padding: 40,
             collapse_delay_ms: 220,
             hide_on_fullscreen: true,
+            reveal_delay_ms: 3000,
             corner_radius: None,
         }
     }
