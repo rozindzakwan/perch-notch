@@ -248,6 +248,30 @@ try {
         Check 'hot_zone_is_thin' ($hot.H -le 8) "hot zone is $($hot.H)px tall (must stay 1-8px)"
     }
 
+    # --- a known, ordinary foreground window --------------------------------
+    # Over a maximized or fullscreen window the notch rests as a stripe (by
+    # design), so whatever the person had in front would change the results.
+    # Put a small, normal window of our own in front first, and bring it back
+    # after the fullscreen / maximized checks.
+    $base = New-Object System.Windows.Forms.Form
+    $base.Text = 'Perch smoke base'
+    $base.StartPosition = 'Manual'
+    $base.Bounds = New-Object System.Drawing.Rectangle 80, 300, 520, 360
+    $base.Show()
+    function Show-Base {
+        $base.Activate()
+        [PerchNative]::SetForegroundWindow($base.Handle) | Out-Null
+        for ($i = 0; $i -lt 15; $i++) {
+            [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100
+            $s = Read-Status
+            if ($s -and $s.obscured -eq $false) { break }
+        }
+    }
+    function Read-Status { try { Get-Content $statusFile -Raw | ConvertFrom-Json } catch { $null } }
+    Show-Base
+    $st = Read-Status
+    Write-Host ("[INFO] base window in front: foreground={0}, obscured={1}" -f ([PerchNative]::GetForegroundWindow() -eq $base.Handle), $st.obscured)
+
     # --- hover expands -------------------------------------------------------
     # Park the cursor well away from the notch FIRST and wait longer than the
     # collapse delay + animation, so the baseline really is the collapsed size.
@@ -381,6 +405,7 @@ try {
         $results['fullscreen_stripes'] = @{ ok = $true; detail = 'skipped: foreground lock' }
     }
     $form.Close(); $form.Dispose()
+    Show-Base
     # The shell's quiet state lags; Perch re-checks 1.5 s after a focus change.
     for ($i = 0; $i -lt 25; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
     $st = Read-Status
@@ -401,6 +426,7 @@ try {
         Write-Host "[INFO] maximized_stripes: skipped (foreground lock)"
     }
     $max.Close(); $max.Dispose()
+    Show-Base
     for ($i = 0; $i -lt 10; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 100 }
     $st = Read-Status
     Check 'unmaximized_restores' ($st.stripe -eq $false) "stripe=$($st.stripe)"
@@ -454,6 +480,7 @@ try {
 }
 finally {
     if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+    if ($base) { $base.Close(); $base.Dispose() }
 }
 
 $resultFile = Join-Path $OutDir 'smoke-results.json'

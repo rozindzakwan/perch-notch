@@ -58,10 +58,13 @@ Real windows, real synthetic input (`SendInput`), real SMTC. The scripts check
 that the mouse is idle before they start and never screenshot more than the
 notch area.
 
-### `scripts/smoke-windows.ps1`: 28/28 passed
+### `scripts/smoke-windows.ps1`: 33/33 passed
 
 It waits until the keyboard and mouse have been idle for 60 s (`scripts/lib-idle.ps1`),
 so it never fights a person at the machine, and captures only the pill window.
+It first puts a small window of its own in front (and brings it back after
+the fullscreen and maximized checks), because over a person's maximized
+window the notch rightly rests as a stripe.
 
 Checks, in order: windows created; the pill and the 2 px hover strip exist with
 `TOOLWINDOW|NOACTIVATE|TOPMOST` and no `APPWINDOW` (no taskbar/Alt-Tab);
