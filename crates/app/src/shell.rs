@@ -1655,8 +1655,8 @@ impl ApplicationHandler<UserEvent> for Shell {
             }
         }
         self.model
-            // Banners wait while something is in front (the notch is a stripe).
-            .set_panel_state(self.expanded(), !self.notch.is_obscured(), Now::real());
+            // Banners wait while the notch is a locked stripe.
+            .set_panel_state(self.expanded(), !self.notch.is_locked(), Now::real());
         let fx = self.model.tick(Now::real());
         let queued = std::mem::take(&mut self.queued);
         self.run_effects(el, fx.into_iter().chain(queued).collect());

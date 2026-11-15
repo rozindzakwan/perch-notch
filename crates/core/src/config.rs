@@ -55,7 +55,8 @@ pub struct NotchConfig {
     /// Shrink the notch to a thin stripe while a fullscreen app or a maximized
     /// window is in front (the key keeps its old name for existing configs).
     pub hide_on_fullscreen: bool,
-    /// How long to hover the stripe before the notch opens.
+    /// How long to hover the stripe to unlock it (it is the normal pill again
+    /// until the next fullscreen or maximized window).
     pub reveal_delay_ms: u32,
     /// Corner radius override; `None` = fully rounded (height / 2).
     pub corner_radius: Option<u32>,
@@ -76,7 +77,7 @@ impl Default for NotchConfig {
             hot_zone_padding: 40,
             collapse_delay_ms: 220,
             hide_on_fullscreen: true,
-            reveal_delay_ms: 2000,
+            reveal_delay_ms: 1000,
             corner_radius: None,
         }
     }

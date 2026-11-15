@@ -7,7 +7,7 @@
 #   - hovering the top edge (xdotool) expands the pill; leaving collapses it
 #   - CLI verbs reach the running instance over the Unix socket
 #   - over a fullscreen or maximized window the notch is a thin stripe that
-#     opens only after a 2 s hover
+#     unlocks into the normal pill after a 1 s hover
 #   - idle memory / CPU
 # and saves screenshots as evidence.
 #
@@ -278,7 +278,7 @@ xdotool mousemove $((MX + 40)) $AWAY
 
 # Auto-hide: over a fullscreen app (EWMH _NET_WM_STATE_FULLSCREEN via the WM)
 # or a maximized window the notch rests as a thin stripe, and hovering it
-# opens the notch only after 2 s. The victim is Perch's own settings window:
+# unlocks it after 1 s (then it is the normal pill). The victim is Perch's own settings window:
 # a normal, focusable top-level.
 "$BIN" settings
 sleep 1
@@ -299,13 +299,18 @@ wmctrl -r "Perch settings" -b add,maximized_vert,maximized_horz
 sleep 1.2
 check maximized_stripes "$([ "$(STATUS .stripe)" = true ] && echo 1 || echo 0)" "stripe=$(STATUS .stripe)"
 xdotool mousemove $CX $TOP
-sleep 1.0
-check stripe_hover_waits "$([ "$(STATUS .state)" = Collapsed ] && echo 1 || echo 0)" "state after 1.0 s: $(STATUS .state)"
-sleep 1.8
-check stripe_hover_reveals "$([ "$(STATUS .state)" = Expanded ] && echo 1 || echo 0)" "state after 2.8 s: $(STATUS .state)"
+sleep 0.5
+check stripe_hover_waits "$([ "$(STATUS .state)" = Collapsed ] && echo 1 || echo 0)" "state after 0.5 s: $(STATUS .state)"
+sleep 1.3
+check stripe_hover_unlocks "$([ "$(STATUS .state)" = Expanded ] && echo 1 || echo 0)" "state after 1.8 s: $(STATUS .state)"
 xdotool mousemove $((MX + 40)) $AWAY
 sleep 1.2
-check stripe_returns "$([ "$(STATUS .stripe)" = true ] && echo 1 || echo 0)" "stripe=$(STATUS .stripe), state $(STATUS .state)"
+check unlocked_rests_as_pill "$([ "$(STATUS .stripe)" = false ] && [ "$(STATUS .state)" = Collapsed ] && echo 1 || echo 0)" "stripe=$(STATUS .stripe), state $(STATUS .state)"
+xdotool mousemove $CX $TOP
+sleep 0.6
+check unlocked_pill_opens_at_once "$([ "$(STATUS .state)" = Expanded ] && echo 1 || echo 0)" "state 0.6 s after hovering the pill: $(STATUS .state)"
+xdotool mousemove $((MX + 40)) $AWAY
+sleep 1.2
 wmctrl -r "Perch settings" -b remove,maximized_vert,maximized_horz
 sleep 1
 check unmaximized_restores "$([ "$(STATUS .stripe)" = false ] && echo 1 || echo 0)" "stripe=$(STATUS .stripe)"

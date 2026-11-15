@@ -449,9 +449,11 @@ windows too, since the notch sits on top of their title bar and content.
 **Decision.** While a fullscreen app or a maximized window is in front of
 the notch's monitor (and `[notch] hide_on_fullscreen` is on, as by default),
 the collapsed notch shrinks to a 120×5 stripe. Hovering the stripe starts a
-`reveal_delay_ms` (2 s) timer: leaving cancels it, staying opens the notch,
-and moving away shrinks it back to the stripe. The hotkey, the CLI and a
-banner click still open it at once. Banners wait until nothing is in front.
+`reveal_delay_ms` (1 s) timer: leaving cancels it, staying **unlocks** it
+and opens the panel. Unlocked, the notch is the normal pill again (hovering
+opens it at once, leaving shows the pill) until the next fullscreen or
+maximized window locks it back to a stripe. The hotkey, the CLI and a
+banner click still open it at once. Banners wait while it is a locked stripe.
 The pill's content fades with its height, so the shrink animation is smooth
 and the stripe is a plain bar. The timer is one deadline, so nothing runs
 while the stripe rests (no wake-ups, 0 CPU).
