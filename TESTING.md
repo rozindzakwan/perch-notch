@@ -263,6 +263,14 @@ GeoClue, then Nominatim), because it would send this machine's position to
 an outside service; reading a real app's logo and opening it through
 `shell:AppsFolder` on Windows; `gtk-launch` on Linux.
 
+## 3f. Mirror stall and quit hang (fixed 2026-11-15)
+
+| Check | Where | Result |
+|---|---|---|
+| Installed build with app icons: mirror on for ~40 min, then `perch quit` | this PC (real install) | **hung**: still running 10 s later, Windows "not responding"; no other app's notification had shown for a while |
+| Fixed build (`winrt::wait` limits, bounded stop): a test toast from PowerShell | this PC (real install, real settings) | banner in the notch after **2.4 s** |
+| Fixed build: `perch quit` | this PC | exits in **1 s** |
+
 ## 3e. Mail: account tabs that fit, editing accounts, the right server
 
 | Test | Where | Result |
