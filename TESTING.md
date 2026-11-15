@@ -220,7 +220,8 @@ was complete and re-scored with `--summarize`.) Evidence:
 | `pulse` (container): System row first, set to 40 %, **follows a `pactl` change made elsewhere (announced as an event)**, mutes | container | passed |
 | model: the collapsed pill shows the current lyric line, wakes only at the next line, and returns to the title when paused | both | passed |
 | core `SeenNotifications`: first snapshot quiet, later only new ids | both | passed |
-| model: another app's notification becomes a half-open banner with the app as caption, never echoed as a toast; nothing when the feature or in-notch notifications are off | Windows (feature is Windows-only) | passed |
+| Linux D-Bus monitor (`session_bus`, private bus, fake daemon): another app's `Notify` arrives as plain text ("<b>See you</b> at 8 &amp; bring it" → "See you at 8 & bring it"), Perch's own is skipped, the daemon still answers both, dropping the mirror stops it; markup stripping unit tests | container | passed |
+| model: another app's notification becomes a half-open banner with the app as caption, never echoed as a toast; nothing when the feature or in-notch notifications are off | both | passed |
 | render: the banner wraps the text onto a second line and draws the app caption | both | passed |
 | **Real app, Windows:** mirror on, a test toast from PowerShell → banner after **0.5 s / 1.1 s**; CPU with nothing arriving **16 ms per 20 s** (reading the list unconditionally every 2 s cost 375–547 ms); mixer rows start with "System volume" | Windows | passed |
 

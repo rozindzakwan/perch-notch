@@ -411,11 +411,9 @@ mod os {
         crate::backends::mixer(sink)
     }
 
-    pub fn notification_mirror(_sink: EventSink) -> Result<Box<dyn std::any::Any>> {
-        Err(perch_core::error::Error::unavailable(
-            "notifications",
-            "mirroring other apps' notifications is Windows-only for now",
-        ))
+    pub fn notification_mirror(sink: EventSink) -> Result<Box<dyn std::any::Any>> {
+        let m = lx::notifications::NotificationMirror::start(sink)?;
+        Ok(Box::new(m))
     }
 
     impl OsServices {

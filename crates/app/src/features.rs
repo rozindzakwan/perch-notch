@@ -111,8 +111,8 @@ impl Feature {
             Feature::Screenshot => cfg!(feature = "screenshot"),
             Feature::CameraMirror => cfg!(feature = "camera"),
             Feature::Mail => cfg!(feature = "mail"),
-            // Windows only for now (UserNotificationListener).
-            Feature::NotificationMirror => cfg!(windows),
+            // Windows: UserNotificationListener. Linux: a D-Bus monitor.
+            Feature::NotificationMirror => cfg!(any(windows, target_os = "linux")),
             // The mixer needs no extra crates on either OS.
             Feature::VolumeMixer => true,
         }

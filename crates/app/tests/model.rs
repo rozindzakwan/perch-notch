@@ -1060,9 +1060,6 @@ fn foreign(app: &str, title: &str, body: &str) -> PlatformEvent {
 
 #[test]
 fn other_apps_notifications_become_banners_when_mirroring_is_on() {
-    if !perch_app::features::Feature::NotificationMirror.compiled_in() {
-        return; // Windows-only feature (UserNotificationListener).
-    }
     let now = t0();
     let mut cfg = config_all();
     cfg.features.notification_mirror = true;

@@ -400,7 +400,7 @@ memory is where it was before the redesign (Windows: ~24 MB private);
 `perch.exe` grew from 8.6 to 9.2 MB. Acrylic blur was evaluated and not used
 (ADR-018).
 
-## ADR-020: Mirroring other apps' notifications (Windows)
+## ADR-020: Mirroring other apps' notifications
 
 The user wanted other apps' notifications (WhatsApp, Teams, Discord...) in
 the notch, not only Perch's own banners. A spike
@@ -428,6 +428,14 @@ feature on doesn't replay the action center. A banner appears 0.5–1.1 s after
 the toast. Perch's own toasts are skipped. The text is held in memory for the
 banner only, never stored or logged.
 
-This is the one feature that checks on a timer. It's opt-in, and the check
-is a file stat. Linux (watching `org.freedesktop.Notifications` with a D-Bus
-monitor) is not implemented yet.
+This is the one feature that checks on a timer (Windows only). It's opt-in,
+and the check is a file stat.
+
+**Linux** needs no timer. Every app sends notifications as an
+`org.freedesktop.Notifications.Notify` call on the session bus, so a separate
+connection calls `BecomeMonitor` with a match rule for exactly that method
+and receives each call as it is made, alongside the desktop's daemon, which
+still shows its own popup and answers the call. Markup and entities in the
+body (`<b>`, `<a href>`, `&amp;`) are stripped to plain text, and Perch's own
+notifications are skipped. Closing the connection stops the reader. Tested
+on a private bus against a fake daemon (`tests/session_bus.rs`).

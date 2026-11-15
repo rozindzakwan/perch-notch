@@ -118,3 +118,99 @@ fn cinnamon_screensaver_lock_becomes_session_locked() {
     zbus::block_on(FakeScreensaver::active_changed(&em, false)).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Ok(false));
 }
+
+#[test]
+#[ignore = "needs a D-Bus session bus (run under dbus-run-session)"]
+fn other_apps_notifications_are_mirrored_as_they_are_sent() {
+    use perch_core::platform::ForeignNotification;
+    use perch_platform_linux::notifications::NotificationMirror;
+
+    // The desktop's daemon (still answers every call: Perch only watches).
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let _daemon = zbus::blocking::connection::Builder::session()
+        .and_then(|b| b.name("org.freedesktop.Notifications"))
+        .and_then(|b| {
+            b.serve_at(
+                "/org/freedesktop/Notifications",
+                FakeDaemon { seen: seen.clone() },
+            )
+        })
+        .and_then(|b| b.build())
+        .unwrap_or_else(|e| panic!("fake daemon: {e}"));
+
+    let (tx, rx) = channel();
+    let tx = Mutex::new(tx);
+    let sink: EventSink = Arc::new(move |ev| {
+        if let PlatformEvent::ForeignNotification(n) = ev {
+            if let Ok(tx) = tx.lock() {
+                let _ = tx.send(n);
+            }
+        }
+    });
+    let mirror = NotificationMirror::start(sink).unwrap_or_else(|e| panic!("monitor: {e}"));
+
+    // Perch's own notification is not mirrored back.
+    DbusNotifier::default()
+        .notify("Time to stretch", "Stand up.")
+        .unwrap_or_else(|e| panic!("notify: {e}"));
+    // Another app's is, as plain text.
+    let app = zbus::blocking::Connection::session().unwrap_or_else(|e| panic!("{e}"));
+    let reply = app.call_method(
+        Some("org.freedesktop.Notifications"),
+        "/org/freedesktop/Notifications",
+        Some("org.freedesktop.Notifications"),
+        "Notify",
+        &(
+            "Thunderbird",
+            0u32,
+            "",
+            "Ann Lee",
+            "<b>See you</b> at 8 &amp; bring it",
+            Vec::<String>::new(),
+            HashMap::<String, zbus::zvariant::Value>::new(),
+            -1i32,
+        ),
+    );
+    assert!(reply.is_ok(), "the daemon still answers: {reply:?}");
+
+    let got = rx
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap_or_else(|e| panic!("no mirrored notification: {e}"));
+    assert_eq!(
+        got,
+        ForeignNotification {
+            app: "Thunderbird".into(),
+            title: "Ann Lee".into(),
+            body: "See you at 8 & bring it".into(),
+        }
+    );
+    assert!(
+        rx.recv_timeout(Duration::from_millis(500)).is_err(),
+        "only that one: Perch's own was skipped"
+    );
+    assert_eq!(
+        seen.lock().map(|s| s.len()).unwrap_or(0),
+        2,
+        "the daemon got both"
+    );
+
+    // Dropping the mirror stops it.
+    drop(mirror);
+    let _ = app.call_method(
+        Some("org.freedesktop.Notifications"),
+        "/org/freedesktop/Notifications",
+        Some("org.freedesktop.Notifications"),
+        "Notify",
+        &(
+            "Thunderbird",
+            0u32,
+            "",
+            "Later",
+            "",
+            Vec::<String>::new(),
+            HashMap::<String, zbus::zvariant::Value>::new(),
+            -1i32,
+        ),
+    );
+    assert!(rx.recv_timeout(Duration::from_millis(500)).is_err());
+}

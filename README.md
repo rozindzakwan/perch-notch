@@ -7,9 +7,9 @@ few tools.
 Move away and it shrinks back.
 
 Written in Rust, with no Electron, no WebView and no background polling (the
-one exception is opt-in: mirroring other apps' notifications checks a file
-once a second). Idle, it uses about 30 MB of RAM and no CPU. It runs on
-**Windows 10/11** and **Linux Mint Cinnamon (X11)**.
+one exception is opt-in: on Windows, mirroring other apps' notifications
+checks a file once a second). Idle, it uses about 30 MB of RAM and no CPU.
+It runs on **Windows 10/11** and **Linux Mint Cinnamon (X11)**.
 
 ![The expanded panel on the Music tab](docs/img/panel-music.png)
 
@@ -42,7 +42,7 @@ config file.
 | **Now playing** | Track, artist, cover art, play/pause/next/previous and a seek bar. Windows: System Media Transport Controls (Spotify, browsers, Media Player...). Linux: MPRIS (Rhythmbox, Firefox, VLC, Spotify...). The collapsed pill shows the track, or the current lyric line, live, when synced lyrics are on. Drag the seek bar to jump. | on |
 | **Synced lyrics** | Time-synced lyrics from [LRCLIB](https://lrclib.net) for the current track, cached on disk. Uses the network, only after you turn it on. | off |
 | **Mail (read-only)** | Unread mail from your IMAP accounts (Gmail, company mail on Spacemail, Yahoo, iCloud, Fastmail, Zoho or any IMAP server): an unread count in the pill, a Mail tab with sender, subject and age, and a notification for new mail. New mail is **pushed** (IMAP IDLE), not polled. Perch opens the inbox read-only and fetches only envelopes, so it **can't mark, move, delete or download** messages. Passwords live in the system keychain (Windows Credential Manager / GNOME Keyring), never in the config file. | off |
-| **Notifications from other apps** | Mirrors Windows notifications (WhatsApp, Teams, Discord, Outlook...) into the notch as a half-open banner: app, sender and two lines of text. Reads them locally through Windows' notification access; nothing is stored or sent. Windows only for now. | off |
+| **Notifications from other apps** | Mirrors other apps' notifications (WhatsApp, Teams, Discord, Thunderbird...) into the notch as a half-open banner: app, sender and two lines of text. Windows: read locally through its notification access. Linux: a copy of each one sent to the desktop's notification service (D-Bus). Nothing is stored or sent. | off |
 | **To-do** | A short list with optional due times, which raise a notification. | on |
 | **Pomodoro** | 25/5 timer with the countdown in the collapsed pill. | off |
 | **Clipboard history** | Text and images, 50 entries, in memory only. Copies that password managers mark as secret are **never read** (Windows clipboard-exclusion formats; X11 `x-kde-passwordManagerHint`). | off |
@@ -230,7 +230,7 @@ screenshot = false
 camera_mirror = false
 speech_to_text = false     # perch-speech build; downloads a model once
 mail = false               # network: your IMAP servers, read-only
-notification_mirror = false  # show other apps' notifications (Windows)
+notification_mirror = false  # show other apps' notifications
 
 [notifications]
 in_notch = true            # banners inside the notch
@@ -301,9 +301,10 @@ this file. Data lives next to it: `%APPDATA%\perch\data` on Windows,
   Save. OCR runs locally.
 - The camera and microphone are opened only while the mirror is visible or
   dictation is recording.
-- Notifications from other apps (off by default) are read locally through
-  Windows' notification access (Settings > Privacy & security >
-  Notifications), held in memory only for the banner, and never stored, logged
+- Notifications from other apps (off by default) are read locally: on Windows
+  through its notification access (Settings > Privacy & security >
+  Notifications), on Linux as a copy of each `Notify` call on your session
+  bus. They are held in memory only for the banner and never stored, logged
   or sent. Turn the feature off and the reader stops.
 
 ## Performance
@@ -490,10 +491,10 @@ The main ones:
   budget (≤ 4 ms at 1×, ≤ 8 ms at 2×) is checked by a test (ADR-019).
 - **No acrylic blur (yet):** on Windows 11 the backdrop can't be confined
   to the rounded shape of a per-pixel-transparent window (ADR-018).
-- **Other apps' notifications:** read through Windows' notification access;
-  with no change event for unpackaged apps, an opt-in worker checks the
-  store's timestamp once a second and reads the list only when it changed
-  (ADR-020).
+- **Other apps' notifications:** on Linux a D-Bus monitor sees each `Notify`
+  call as it happens. On Windows, which gives unpackaged apps no change event,
+  an opt-in worker checks the store's timestamp once a second and reads the
+  list only when it changed (ADR-020).
 - **Unsafe code** only in thin OS wrappers, each block with a `// SAFETY:`
   comment. `#![forbid(unsafe_code)]` everywhere else.
 
